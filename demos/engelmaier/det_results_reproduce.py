@@ -33,6 +33,7 @@ import stratcona
 
 
 # Source #1 Solder Creep-Fatigue Model Parameters for SAC & SnAg Lead-Free Solder Joint
+# https://www.circuitinsight.com/pdf/solder_creep_fatigue_ipc.pdf
 # Reliability Estimation by William Engelmaier and Associates
 
 # Parameter for this equation:
@@ -99,7 +100,49 @@ def run_engelmaier_sac_snsg_det():
     plt.show()
     return
 
-run_engelmaier_sac_snsg_det()
+# run_engelmaier_sac_snsg_det()
 
 
-# Source #2 
+# Source #2 https://ieeexplore.ieee.org/abstract/document/10835367
+# Fatigue Life Analysis of Hybrid Bonding in Micro-LED Interconnection
+# Parameter for this equation:
+# - N_f_50: the number to cycles to failure at 50% probability (median fatigue life)
+# - e_f: fatigue ductility coefficient (solder material property)
+# - delta_e: range of equivalent plastic strain
+# - c_0, c_1, c_2 : empirical found material coefficients
+# - T_A: average temperature of the thermal cycling (C)
+# - f : frequency of cycling (cycles per day)
+
+def calc_engelmaier_hybrid_microled(e_f, delta_e, c_0, c_1, c_2, T_a, f):
+    c =  c_0 + c_1*T_a + c_2*jnp.log(1 + f) 
+    print("constant c = ", float(c))
+    N_f_50 = 0.5*((jnp.sqrt(3) / 2) * ( delta_e / e_f) )**(-1/c) # this paper uses -1/c? 
+    
+    
+    return N_f_50
+
+# This function is for recreating the data found in Source #1 since it contained graphs
+# I will first try to recreate it deterministically
+def run_engelmaier_hybrid_microled():
+    # For recreating the data, I want to sweep sheer strain from 0.01 to 100
+    # and record the mean cycles to failure
+
+    # Variables for Hybrid Bonding MicroLED Paper
+        # This paper does not disclose the true constants
+    e_f     = 0.325
+    delta_e = 6.708e-3
+    c_0     = 0.3552  #0.422orig tweaking to match the c = 0.397 they report
+    c_1     = -6e-4 
+    c_2     = 1.74e-2 #twea
+    T_a     = 35
+    f       = 35
+
+    Nf_hybrid_microled = calc_engelmaier_hybrid_microled(
+        e_f, delta_e, c_0, c_1, c_2, T_a, f
+    )
+
+    print(Nf_hybrid_microled)
+   
+    return
+
+run_engelmaier_hybrid_microled()
