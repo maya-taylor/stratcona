@@ -8,8 +8,6 @@ npyro.set_host_device_count(4)
 import jax.numpy as jnp
 import jax.random as rand
 
-
-
 import time
 from functools import partial
 import json

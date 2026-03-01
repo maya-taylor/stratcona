@@ -133,7 +133,7 @@ def run_engelmaier_hybrid_microled():
     delta_e = 6.708e-3
     c_0     = 0.3552  #0.422orig tweaking to match the c = 0.397 they report
     c_1     = -6e-4 
-    c_2     = 1.74e-2 #twea
+    c_2     = 1.74e-2 
     T_a     = 35
     f       = 35
 
