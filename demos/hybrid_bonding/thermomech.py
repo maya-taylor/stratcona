@@ -1,3 +1,4 @@
+import jax
 import numpyro as npyro
 import numpyro.distributions as dists
 import numpyro.distributions.transforms as tfs
@@ -33,70 +34,80 @@ import stratcona
 def hybrid_bonding_thermomech():
     ##########################################
     # My Fabricated Experimental Data Here ?
-    ##########################################
+    ###########################################
 
+    # Pairs of points [ % delta_D, Nf (means cycles to failure)]
+    delta_D_Nfdata = [[11, 10], [9, 10E2], [1.8,10E3], [0.6,10E4], [0.2,10E5], [0.07, 10E6]]
 
-    # I am confused what my data here would be?
-    # Would it just be Nf and a list of parameters?
+    # Convert fabricated data to arrays
+    delta_D_data = jnp.array([pt[0] for pt in delta_D_Nfdata])/100
+    Nf_data      = jnp.array([pt[1] for pt in delta_D_Nfdata])
 
     ########################################################
     # Defining the Model
     ########################################################
-    
-    # Source #1 Solder Creep-Fatigue Model Parameters for SAC & SnAg Lead-Free Solder Joint
-    # https://www.circuitinsight.com/pdf/solder_creep_fatigue_ipc.pdf
-    # Reliability Estimation by William Engelmaier and Associates
-
-    # Parameter for this equation:
-    # - N_f_50: the number to cycles to failure at 50% probability (median fatigue life)
-    # - e_f: fatigue ductility coefficient (solder material property)
-    # - c_0, c_1, c_2 : empirical found material coefficients
-    # - t_0: dwell time at high temperature (seconds)
-    # - t_D: reference time constant (seconds)
-    # - delta_D: inelastic (plastic) strain range for cycles (dimensionless ratio delta_L/L)
-  
-  
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
         m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
         N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
         return N_f_50
     
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
-    #     delta_D = jnp.logspace(-3, 0, 1000)
-    #     T_sj = 50
-    #     t_D = 600
-    mb = add_params(T_sj = 50, t_D = 600, t_0 = 360) # These will be deterministic?
-    # figure out if these params will be in test conditions or somewhere else??
+    mb.add_params(t_0=360)
     
-    mb.add_hyperlatent('e_f_nom', dists.Normal({'loc': 0.325, 'scale': 0.01}))
-    mb.add_hyperlatent('c_0_nom', dists.Normal({'loc': 0.442, 'scale': 0.01}))
-    mb.add_hyperlatent('c_1_nom', dists.Normal({'loc': 6.00E-04, 'scale' : 1E-5}))
-    mb.add_hyperlatent('c_2_nom', dists.Normal({'loc': -1.72E-02, 'scale' : 5E-04}))
-    mb.add_hyperlatent('delta_D_nom', dists.Normal({'loc': 100, 'scale': 1E-10})) # not sure what to do with strain range? I think give number and like no variance..
-
+    mb.add_hyperlatent('e_f_nom', dists.Normal, {'loc': 0.325, 'scale': 0.01})
+    mb.add_hyperlatent('c_0_nom', dists.Normal, {'loc': 0.442, 'scale': 0.01})
+    mb.add_hyperlatent('c_1_nom', dists.Normal, {'loc': 6.00E-04, 'scale': 1E-5})
+    mb.add_hyperlatent('c_2_nom', dists.Normal, {'loc': -1.72E-02, 'scale': 5E-04})
+    mb.add_hyperlatent('sigma_nom', dists.HalfNormal, {'scale': 0.5})
+    
     mb.add_latent('e_f', nom='e_f_nom')
     mb.add_latent('c_0', nom='c_0_nom')
-    mb.add_latent('c_1_nom', nom='c_1_nom')
-    mb.add_latent('c_2_nom', nom='c_2_nom')
-    mb.add_latent('delta_D', nom='delta_D_nom')
-
-    mb.add_intermediate('engelmaier_nf', calc_engelmaier)  
-
-    # I think my made up data should relate delta_D to Nf since that is what that papers
-    # real data was on? maybe there is real data.... CHECK
-    mb.add_observed('nf_delta_D')
+    mb.add_latent('c_1', nom='c_1_nom')
+    mb.add_latent('c_2', nom='c_2_nom')
+    mb.add_latent('sigma', nom='sigma_nom')
+    
+    mb.add_intermediate('engelmaier_nf', calc_engelmaier)
+    mb.add_intermediate('log_nf', lambda engelmaier_nf: jnp.log(engelmaier_nf))
+    
+    mb.add_observed(
+        'nf_delta_D',
+        dists.LogNormal,
+        {'loc': 'log_nf', 'scale': 'sigma'},
+        len(delta_D_data)
+    )
 
     am = stratcona.AnalysisManager(mb.build_model(), rng_seed=424242)
 
     #################################################################
-    # Define how the data was collected? I could do this?
-    # Will this work if I change params instead of latents?
+    # Define how the data was collected
     #################################################################
+    accel_test = stratcona.TestDef(
+        'accel_test',
+        {'at_50C_10m': {'lot': 1, 'chp': len(delta_D_data)}},
+        {'at_50C_10m': {'T_sj': 50, 't_D': 600, 'delta_D': delta_D_data}}
+    )
+    am.set_test_definition(accel_test)
 
-    # I think the test conditions will be the times + temperature...
+    #################################################################
+    # -------- INFERENCE ON THE MODEL -----------------------------
+    #################################################################
+    start_time = time.time()
+    # measured data must be keyed by the *scenario* name that appears in
+    # the TestDef.dims/conds dictionaries, not by the name of the TestDef
+    # itself.  the value associated with that key is a mapping from the
+    # observed site name to the array of observations.
+    measured_data = {
+        'at_50C_10m': {            # matches the key in accel_test.dims
+            'nf_delta_D': Nf_data  # matches the observed site added above
+        }
+    }
 
+    am.do_inference(measured_data)
+    print(f'Inference completed in {time.time() - start_time:.2f} seconds')
+    print("Posterior hyper-latent beliefs:")
+    print(am.relmdl.hyl_beliefs)
 
-
+hybrid_bonding_thermomech()
 
 
 
