@@ -22,7 +22,10 @@ import sys
 # This line adds the parent directory to the module search path so that the Stratcona module can be seen and imported
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-import stratcona
+# This script is for reproducing the sampling results for the Engelmaier model that in the paper
+# listed in source 1 below. The goal was to check that I had reasonable priors to help produce good results
+# once I used them in the actual model.
+
 
 def calc_engelmaier_sac_snsg(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
     m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
@@ -30,6 +33,18 @@ def calc_engelmaier_sac_snsg(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
     return N_f_50
 
 # This function is for recreating the data found in Source #1 since it contained graphs
+   # Source #1 Solder Creep-Fatigue Model Parameters for SAC & SnAg Lead-Free Solder Joint
+    # https://www.circuitinsight.com/pdf/solder_creep_fatigue_ipc.pdf
+    # Reliability Estimation by William Engelmaier and Associates
+
+    # Parameter for this equation:
+    # - N_f_50: the number to cycles to failure at 50% probability (median fatigue life)
+    # - e_f: fatigue ductility coefficient (solder material property)
+    # - c_0, c_1, c_2 : empirical found material coefficients
+    # - t_0: dwell time at high temperature (seconds)
+    # - t_D: reference time constant (seconds)
+    # - delta_D: inelastic (plastic) strange range for cycles (dimensionless ratio delta_L/L)
+
 def run_engelmaier_sac_snsg_mc(
     n_samples=500,
     seed=0

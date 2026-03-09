@@ -46,6 +46,19 @@ def hybrid_bonding_thermomech():
     ########################################################
     # Defining the Model
     ########################################################
+
+    # Source #1 Solder Creep-Fatigue Model Parameters for SAC & SnAg Lead-Free Solder Joint
+    # https://www.circuitinsight.com/pdf/solder_creep_fatigue_ipc.pdf
+    # Reliability Estimation by William Engelmaier and Associates
+
+    # Parameter for this equation:
+    # - N_f_50: the number to cycles to failure at 50% probability (median fatigue life)
+    # - e_f: fatigue ductility coefficient (solder material property)
+    # - c_0, c_1, c_2 : empirical found material coefficients
+    # - t_0: dwell time at high temperature (seconds)
+    # - t_D: reference time constant (seconds)
+    # - delta_D: inelastic (plastic) strange range for cycles (dimensionless ratio delta_L/L)
+
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
         m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
         N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
@@ -54,7 +67,7 @@ def hybrid_bonding_thermomech():
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
     mb.add_params(t_0=360)
     
-    mb.add_hyperlatent('e_f_nom', dists.Normal, {'loc': 0.325, 'scale': 0.01})
+    mb.add_hyperlatent('e_f_nom', dists.Normal, {'loc': 0.325, 'scale': 0.001})
     mb.add_hyperlatent('c_0_nom', dists.Normal, {'loc': 0.442, 'scale': 0.01})
     mb.add_hyperlatent('c_1_nom', dists.Normal, {'loc': 6.00E-04, 'scale': 1E-5})
     mb.add_hyperlatent('c_2_nom', dists.Normal, {'loc': -1.72E-02, 'scale': 5E-04})
@@ -67,12 +80,11 @@ def hybrid_bonding_thermomech():
     mb.add_latent('sigma', nom='sigma_nom')
     
     mb.add_intermediate('engelmaier_nf', calc_engelmaier)
-    mb.add_intermediate('log_nf', lambda engelmaier_nf: jnp.log(engelmaier_nf))
-    
+
     mb.add_observed(
         'nf_delta_D',
-        dists.LogNormal,
-        {'loc': 'log_nf', 'scale': 'sigma'},
+        dists.Normal,
+        {'loc': 'engelmaier_nf', 'scale': 'sigma'},
         len(delta_D_data)
     )
 
@@ -81,6 +93,8 @@ def hybrid_bonding_thermomech():
     #################################################################
     # Define how the data was collected
     #################################################################
+
+    # These are the numbers taken from Fig 10 in the paper
     accel_test = stratcona.TestDef(
         'accel_test',
         {'at_50C_10m': {'lot': 1, 'chp': len(delta_D_data)}},
@@ -92,13 +106,10 @@ def hybrid_bonding_thermomech():
     # -------- INFERENCE ON THE MODEL -----------------------------
     #################################################################
     start_time = time.time()
-    # measured data must be keyed by the *scenario* name that appears in
-    # the TestDef.dims/conds dictionaries, not by the name of the TestDef
-    # itself.  the value associated with that key is a mapping from the
-    # observed site name to the array of observations.
+
     measured_data = {
-        'at_50C_10m': {            # matches the key in accel_test.dims
-            'nf_delta_D': Nf_data  # matches the observed site added above
+        'at_50C_10m': {            
+            'nf_delta_D': Nf_data  
         }
     }
 
@@ -107,175 +118,44 @@ def hybrid_bonding_thermomech():
     print("Posterior hyper-latent beliefs:")
     print(am.relmdl.hyl_beliefs)
 
+    #################################################################
+    # -------- SAMPLE FROM POSTERIOR DISTRIBUTIONS -------------------
+    #################################################################
+    
+    rng_key = rand.key(999)
+    posterior_samples = {}
+    
+    for hyl_name, hyl_params in am.relmdl.hyl_beliefs.items():
+        # Create distribution from fitted parameters
+        dist = dists.Normal(**hyl_params)
+        rng_key, subkey = rand.split(rng_key)
+        posterior_samples[hyl_name] = dist.sample(subkey, sample_shape=(5000,))
+        print(f"{hyl_name}: mean={float(jnp.mean(posterior_samples[hyl_name])):.6f}, std={float(jnp.std(posterior_samples[hyl_name])):.6f}")
+
+    #################################################################
+    # -------- PLOT POSTERIOR DISTRIBUTIONS --------------------------
+    #################################################################
+    
+    n_vars = len(posterior_samples)
+    fig, axes = plt.subplots((n_vars + 1) // 2, 2, figsize=(12, 3 * ((n_vars + 1) // 2)))
+    axes = axes.flatten()
+    
+    for idx, (hyl_name, samples) in enumerate(posterior_samples.items()):
+        ax = axes[idx]
+        ax.hist(samples, bins=50, density=True, alpha=0.7, edgecolor='black')
+        ax.set_xlabel(hyl_name)
+        ax.set_ylabel('Density')
+        ax.set_title(f'Posterior: {hyl_name}')
+        ax.grid(True, alpha=0.3)
+    
+    # Remove extra subplots
+    for idx in range(n_vars, len(axes)):
+        fig.delaxes(axes[idx])
+    
+    plt.tight_layout()
+    plt.savefig('posterior_distributions.png', dpi=150, bbox_inches='tight')
+    print(f"\nPlot saved as 'posterior_distributions.png'")
+    plt.show()
+
 hybrid_bonding_thermomech()
 
-
-
-#     # Nominal values
-#     snpb_nom = {
-#         "e_f": 0.325,
-#         "c_0": 0.442,
-#         "c1": 6.00e-04,
-#         "c2": -1.72e-02,
-#         "t_0": 360
-#     }
-#     # variance parameters
-#     snpb_sigma = {
-#         "e_f": 0.01,
-#         "c_0": 0.005,
-#         "c1":  1e-05,
-#         "c2":  5e-04,
-#         "t_0": 5.0
-#     }
-
-
-
-# # This function is for recreating the data found in Source #1 since it contained graphs
-# def run_engelmaier_sac_snsg_mc(
-#     n_samples=500,
-#     seed=0
-# ):
-
-#     key = rand.PRNGKey(seed)
-
-#     # Nominal values
-#     snpb_nom = {
-#         "e_f": 0.325,
-#         "c_0": 0.442,
-#         "c1": 6.00e-04,
-#         "c2": -1.72e-02,
-#         "t_0": 360
-#     }
-
-#     snag_nom = {
-#         "e_f": 0.275,
-#         "c_0": 0.430,
-#         "c1": 6.30e-04,
-#         "c2": -1.82e-02,
-#         "t_0": 400
-#     }
-
-#     # variance parameters
-#     snpb_sigma = {
-#         "e_f": 0.01,
-#         "c_0": 0.005,
-#         "c1":  1e-05,
-#         "c2":  5e-04,
-#         "t_0": 5.0
-#     }
-
-#     snag_sigma = {
-#         "e_f": 0.001,
-#         "c_0": 0.005,
-#         "c1":  1e-05,
-#         "c2":  5e-04,
-#         "t_0": 5.0
-#     }
-
-#     delta_D = jnp.logspace(-3, 0, 1000)
-#     T_sj = 50
-#     t_D = 600
-
-#     def sample_params(key, nom_dict, sigma_dict):
-#         keys = rand.split(key, len(nom_dict))
-#         sampled = {}
-#         for i, k in enumerate(nom_dict):
-#             mu = nom_dict[k]
-#             sigma = sigma_dict[k]
-#             sampled[k] = mu + sigma * rand.normal(keys[i])
-#         return sampled
-
-#     Nf_snpb_all = []
-#     Nf_snag_all = []
-
-#     keys = rand.split(key, n_samples)
-
-#     for i in range(n_samples):
-
-#         p_snpb = sample_params(keys[i], snpb_nom, snpb_sigma)
-#         p_snag = sample_params(keys[i], snag_nom, snag_sigma)
-
-#         Nf_snpb = calc_engelmaier_sac_snsg(
-#             p_snpb["e_f"], p_snpb["c_0"], p_snpb["c1"], p_snpb["c2"],
-#             p_snpb["t_0"], T_sj, t_D, delta_D
-#         )
-
-#         Nf_snag = calc_engelmaier_sac_snsg(
-#             p_snag["e_f"], p_snag["c_0"], p_snag["c1"], p_snag["c2"],
-#             p_snag["t_0"], T_sj, t_D, delta_D
-#         )
-
-#         Nf_snpb_all.append(Nf_snpb)
-#         Nf_snag_all.append(Nf_snag)
-
-#     Nf_snpb_all = jnp.stack(Nf_snpb_all)
-#     Nf_snag_all = jnp.stack(Nf_snag_all)
-
-#     # Summary stats
-#     def summarize(samples):
-#         mean = jnp.mean(samples, axis=0)
-#         lower = jnp.percentile(samples, 5, axis=0)
-#         upper = jnp.percentile(samples, 95, axis=0)
-#         return mean, lower, upper
-
-#     mean_snpb, low_snpb, high_snpb = summarize(Nf_snpb_all)
-#     mean_snag, low_snag, high_snag = summarize(Nf_snag_all)
-
-#     # Plot
-#     plt.figure(figsize=(8,6))
-
-#     # ---- SnPb ----
-#     plt.plot(
-#         mean_snpb,
-#         100*delta_D,
-#         color="blue",
-#         linewidth=2,
-#         label="SnPb Mean"
-#     )
-
-#     plt.fill_betweenx(
-#         100*delta_D,
-#         low_snpb,
-#         high_snpb,
-#         color="blue",
-#         alpha=0.2
-#     )
-
-#     plt.plot(low_snpb, 100*delta_D, color="blue", linestyle="--", linewidth=1)
-#     plt.plot(high_snpb, 100*delta_D, color="blue", linestyle="--", linewidth=1)
-
-
-#     # ---- SnAg ----
-#     plt.plot(
-#         mean_snag,
-#         100*delta_D,
-#         color="red",
-#         linewidth=2,
-#         label="SnAg Mean"
-#     )
-
-#     plt.fill_betweenx(
-#         100*delta_D,
-#         low_snag,
-#         high_snag,
-#         color="red",
-#         alpha=0.2
-#     )
-
-#     plt.plot(low_snag, 100*delta_D, color="red", linestyle=":", linewidth=1)
-#     plt.plot(high_snag, 100*delta_D, color="red", linestyle=":", linewidth=1)
-
-
-#     plt.xscale("log")
-#     plt.yscale("log")
-
-#     plt.xlabel("Mean Cycles to Failure (Nf, 50%)")
-#     plt.ylabel("Inelastic Strain Range (ΔD)")
-#     plt.title("Engelmaier Model Monte Carlo Bands")
-
-#     plt.legend()
-#     plt.grid(True, which="both")
-#     plt.tight_layout()
-#     plt.show()
-
-# run_engelmaier_sac_snsg_mc()
