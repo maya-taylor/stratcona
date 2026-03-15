@@ -72,21 +72,17 @@ def hybrid_bonding_thermomech():
     #################################################################
     # Define Prior Parameters
     #################################################################
-
-    # Using priors from SAC105 and Data from SnPb to see if model will update beliefs accordingly
-    e_f_prior = {'loc': 0.225, 'scale': 0.1}      # fatigue ductility coefficient
-    c_0_prior = {'loc': 0.480, 'scale': 0.1}  # base fatigue exponent
-    c_1_prior = {'loc': 9.30E-04, 'scale': 1E-03}   # temperature coefficient
-    c_2_prior = {'loc': -1.92E-02, 'scale': 5E-02}  # dwell time coefficient
-    log_sigma_prior = {'loc': 0.5, 'scale': 1}    # log-space measurement variance
     
-    print("="*70)
-    print("Priors being used:")
+    # Using priors from SAC105 and Data from SnPb to see if model will update beliefs accordingly
+    e_f_prior = {'loc': 0.225, 'scale': 0.5}      # fatigue ductility coefficient
+    c_0_prior = {'loc': 0.480, 'scale': 0.1}  # base fatigue exponent
+    c_1_prior = {'loc': 9.30E-04, 'scale': 5E-4}   # temperature coefficient
+    c_2_prior = {'loc': -1.92E-02, 'scale': 5E-3}  # dwell time coefficient
+
     print(f"  e_f:     loc={e_f_prior['loc']}, scale={e_f_prior['scale']}")
     print(f"  c_0:     loc={c_0_prior['loc']}, scale={c_0_prior['scale']}")
     print(f"  c_1:     loc={c_1_prior['loc']}, scale={c_1_prior['scale']}")
     print(f"  c_2:     loc={c_2_prior['loc']}, scale={c_2_prior['scale']}")
-    print("="*70)
     print()
 
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
@@ -100,26 +96,28 @@ def hybrid_bonding_thermomech():
         return jnp.log(N_f)
     
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
-    mb.add_params(t_0=400)
+    mb.add_params(t_0=400, meas_var = 1E5)  # Measurement variance in log-space (reasonable for data uncertainty)
     
     mb.add_hyperlatent('e_f_nom', dists.Normal, e_f_prior)
     mb.add_hyperlatent('c_0_nom', dists.Normal, c_0_prior)
     mb.add_hyperlatent('c_1_nom', dists.Normal, c_1_prior)
     mb.add_hyperlatent('c_2_nom', dists.Normal, c_2_prior)
-    mb.add_hyperlatent('log_sigma_nom', dists.Normal, log_sigma_prior)
     
-    mb.add_latent('e_f', nom='e_f_nom')
+    # Ian mentioned defining latents below w/o adding variance is redundant
+    # need to fix references 
+    mb.add_latent('e_f', nom='e_f_nom') 
     mb.add_latent('c_0', nom='c_0_nom')
     mb.add_latent('c_1', nom='c_1_nom')
     mb.add_latent('c_2', nom='c_2_nom')
-    mb.add_latent('log_sigma', nom='log_sigma_nom')
     
     mb.add_intermediate('log_engelmaier_nf', calc_log_engelmaier)
+    #mb.add_intermediate('engelmaier_nf', calc_engelmaier)
+
 
     mb.add_observed(
         'nf_delta_D',
-        dists.LogNormal,
-        {'loc': 'log_engelmaier_nf', 'scale': 'log_sigma'},
+        dists.Normal,
+        {'loc': 'log_engelmaier_nf', 'scale': 'meas_var'},
         1  # One observation per test condition
     )
 
@@ -174,6 +172,258 @@ def hybrid_bonding_thermomech():
         print(f"{hyl_name}: mean={float(jnp.mean(posterior_samples[hyl_name])):.6f}, std={float(jnp.std(posterior_samples[hyl_name])):.6f}")
 
     #################################################################
+    # -------- GENERATE POSTERIOR PREDICTIONS -------------------------
+    #################################################################
+    
+    # Generate Nf predictions across delta_D range using posterior samples
+    delta_D_range = jnp.logspace(-4, 0, 1000)
+    T_sj = 50
+    t_D = 600
+    t_0 = 400
+    
+    # Extract posterior samples as arrays
+    e_f_samples = posterior_samples['e_f_nom']
+    c_0_samples = posterior_samples['c_0_nom']
+    c_1_samples = posterior_samples['c_1_nom']
+    c_2_samples = posterior_samples['c_2_nom']
+    
+    n_samples_posterior = len(e_f_samples)
+    Nf_hb_all = []
+    
+    for i in range(n_samples_posterior):
+        # Ensure parameters are positive
+        e_f = jnp.maximum(e_f_samples[i], 0.01)
+        c_0 = jnp.maximum(c_0_samples[i], 0.01)
+        c_1 = jnp.maximum(c_1_samples[i], 0.0001)
+        c_2 = c_2_samples[i]
+        
+        Nf_hb = calc_engelmaier(
+            e_f, c_0, c_1, c_2,
+            t_0, T_sj, t_D, delta_D_range
+        )
+        Nf_hb_all.append(Nf_hb)
+    
+    Nf_hb_all = jnp.stack(Nf_hb_all)
+    
+    # Replace inf/nan with reasonable values for visualization
+    Nf_hb_all = jnp.where(jnp.isfinite(Nf_hb_all), Nf_hb_all, 1e10)
+    
+    # Compute summary statistics
+    def summarize(samples):
+        mean = jnp.mean(samples, axis=0)
+        lower = jnp.percentile(samples, 5, axis=0)
+        upper = jnp.percentile(samples, 95, axis=0)
+        return mean, lower, upper
+    
+    mean_hb, low_hb, high_hb = summarize(Nf_hb_all)
+    
+    # Replace remaining inf values
+    mean_hb = jnp.where(jnp.isfinite(mean_hb), mean_hb, 1e10)
+    low_hb = jnp.where(jnp.isfinite(low_hb), low_hb, 1e1)
+    high_hb = jnp.where(jnp.isfinite(high_hb), high_hb, 1e10)
+    
+    #################################################################
+    # -------- COMPUTE MEAN PREDICTION FROM POSTERIOR MEANS ----------
+    #################################################################
+    
+    # Extract posterior means (loc values) from the fitted distributions
+    e_f_mean = float(am.relmdl.hyl_beliefs['e_f_nom']['loc'])
+    c_0_mean = float(am.relmdl.hyl_beliefs['c_0_nom']['loc'])
+    c_1_mean = float(am.relmdl.hyl_beliefs['c_1_nom']['loc'])
+    c_2_mean = float(am.relmdl.hyl_beliefs['c_2_nom']['loc'])
+    
+    
+    # Calculate deterministic prediction using posterior means
+    mean_pred_hb = calc_engelmaier(
+        e_f_mean, c_0_mean, c_1_mean, c_2_mean,
+        t_0, T_sj, t_D, delta_D_range
+    )
+    
+    print(f"\nPosterior mean parameters:")
+    print(f"  e_f: {e_f_mean:.6f}")
+    print(f"  c_0: {c_0_mean:.6f}")
+    print(f"  c_1: {c_1_mean:.8f}")
+    print(f"  c_2: {c_2_mean:.8f}")
+    
+    #################################################################
+    # -------- PLOT POSTERIOR vs DELTA_D (LIKE SAMPLING REPRODUCE) ----
+    #################################################################
+    
+    plt.figure(figsize=(8, 6))
+    
+    # ---- Hybrid Bonding (posterior mean from distribution means) ----
+    plt.plot(
+        mean_pred_hb,
+        100*delta_D_range,
+        color="purple",
+        linewidth=3,
+        label="HB Posterior Mean"
+    )
+    
+    # ---- Hybrid Bonding (posterior ensemble) ----
+    plt.plot(
+        mean_hb,
+        100*delta_D_range,
+        color="purple",
+        linewidth=1.5,
+        linestyle=":",
+        label="HB Ensemble Mean",
+        alpha=0.7
+    )
+    
+    plt.fill_betweenx(
+        100*delta_D_range,
+        low_hb,
+        high_hb,
+        color="purple",
+        alpha=0.2
+    )
+    
+    plt.plot(low_hb, 100*delta_D_range, color="purple", linestyle="--", linewidth=1, alpha=0.6)
+    plt.plot(high_hb, 100*delta_D_range, color="purple", linestyle="--", linewidth=1, alpha=0.6)
+    
+    # ---- SnPb Mean (reference) ----
+    snpb_nom_vals = {
+        "e_f": 0.325,
+        "c_0": 0.442,
+        "c1": 6.00e-04,
+        "c2": -1.74e-02,
+        "t_0": 360
+    }
+    
+    Nf_snpb_mean = calc_engelmaier(
+        snpb_nom_vals["e_f"], snpb_nom_vals["c_0"], snpb_nom_vals["c1"], snpb_nom_vals["c2"],
+        snpb_nom_vals["t_0"], T_sj, t_D, delta_D_range
+    )
+    
+    plt.plot(
+        Nf_snpb_mean,
+        100*delta_D_range,
+        color="blue",
+        linewidth=2.5,
+        label="SnPb Mean"
+    )
+    
+    # ---- SAC105 Mean (reference) ----
+    sac105_nom_vals = {
+        "e_f": 0.225,
+        "c_0": 0.480,
+        "c1": 9.30e-04,
+        "c2": -1.92e-02,
+        "t_0": 500
+    }
+    
+    Nf_sac105_mean = calc_engelmaier(
+        sac105_nom_vals["e_f"], sac105_nom_vals["c_0"], sac105_nom_vals["c1"], sac105_nom_vals["c2"],
+        sac105_nom_vals["t_0"], T_sj, t_D, delta_D_range
+    )
+    
+    plt.plot(
+        Nf_sac105_mean,
+        100*delta_D_range,
+        color="green",
+        linewidth=2.5,
+        label="SAC105 Mean"
+    )
+    
+    plt.xscale("log")
+    plt.yscale("log")
+    plt.xlim(10**1, 10**6)
+    
+    plt.xlabel("Mean Cycles to Failure (Nf, 50%)", fontsize=12)
+    plt.ylabel("Inelastic Strain Range (ΔD, %)", fontsize=12)
+    plt.title("Hybrid Bonding - Engelmaier Model Posterior", fontsize=14, fontweight='bold')
+    plt.legend(fontsize=11)
+    plt.grid(True, which="both", alpha=0.3)
+    plt.tight_layout()
+    
+    filename_posterior = 'hybrid_bonding_posterior.png'
+    plt.savefig(filename_posterior, dpi=150, bbox_inches='tight')
+    print(f"\nPosterior plot saved as '{filename_posterior}'")
+    plt.show()
+    #################################################################
+    # -------- PLOT POSTERIOR PREDICTIONS WITH REFERENCE SOLDERS ------
+    #################################################################
+    
+    # Reference solder data (from sampling_results_reproduce.py)
+    snpb_nom = {
+        "e_f": 0.325,
+        "c_0": 0.442,
+        "c1": 6.00e-04,
+        "c2": -1.74e-02,
+        "t_0": 360
+    }
+    
+    snpb_sigma = {
+        "e_f": 0.01,
+        "c_0": 0.005,
+        "c1":  1e-05,
+        "c2":  5e-04,
+        "t_0": 5.0
+    }
+    
+    sac105_nom = {
+        "e_f": 0.225,
+        "c_0": 0.480,
+        "c1": 9.30e-04,
+        "c2": -1.92e-02,
+        "t_0": 500
+    }
+    
+    sac105_sigma = {
+        "e_f": 0.01,
+        "c_0": 0.005,
+        "c1":  1e-05,
+        "c2":  5e-04,
+        "t_0": 5.0
+    }
+    
+    # Generate reference predictions
+    def sample_params(key, nom_dict, sigma_dict):
+        keys = rand.split(key, len(nom_dict))
+        sampled = {}
+        for i, k in enumerate(nom_dict):
+            mu = nom_dict[k]
+            sigma = sigma_dict[k]
+            sampled[k] = mu + sigma * rand.normal(keys[i])
+        return sampled
+    
+    rng_key_ref = rand.key(42)
+    n_ref_samples = 500
+    Nf_snpb_all = []
+    Nf_sac105_all = []
+    
+    keys = rand.split(rng_key_ref, n_ref_samples)
+    
+    def calc_engelmaier_ref(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
+        m = c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D)
+        N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
+        return N_f_50
+    
+    for i in range(n_ref_samples):
+        p_snpb = sample_params(keys[i], snpb_nom, snpb_sigma)
+        p_sac105 = sample_params(keys[i], sac105_nom, sac105_sigma)
+        
+        Nf_snpb = calc_engelmaier_ref(
+            p_snpb["e_f"], p_snpb["c_0"], p_snpb["c1"], p_snpb["c2"],
+            p_snpb["t_0"], T_sj, t_D, delta_D_range
+        )
+        
+        Nf_sac105 = calc_engelmaier_ref(
+            p_sac105["e_f"], p_sac105["c_0"], p_sac105["c1"], p_sac105["c2"],
+            p_sac105["t_0"], T_sj, t_D, delta_D_range
+        )
+        
+        Nf_snpb_all.append(Nf_snpb)
+        Nf_sac105_all.append(Nf_sac105)
+    
+    Nf_snpb_all = jnp.stack(Nf_snpb_all)
+    Nf_sac105_all = jnp.stack(Nf_sac105_all)
+    
+    mean_snpb, low_snpb, high_snpb = summarize(Nf_snpb_all)
+    mean_sac105, low_sac105, high_sac105 = summarize(Nf_sac105_all)
+    
+    #################################################################
     # -------- PLOT POSTERIOR DISTRIBUTIONS WITH PRIORS ---------------
     #################################################################
     
@@ -182,8 +432,7 @@ def hybrid_bonding_thermomech():
         'e_f_nom': e_f_prior,
         'c_0_nom': c_0_prior,
         'c_1_nom': c_1_prior,
-        'c_2_nom': c_2_prior,
-        'log_sigma_nom': log_sigma_prior
+        'c_2_nom': c_2_prior
     }
     
     # Expected nominal values from SnPb solder data
@@ -191,7 +440,7 @@ def hybrid_bonding_thermomech():
         'e_f_nom': 0.325,
         'c_0_nom': 0.442,
         'c_1_nom': 6.00e-04,
-        'c_2_nom': -1.74e-02,
+        'c_2_nom': -1.74e-02
     }
 
     model_mode = "Hybrid Bonding Thermomechanical Model"
