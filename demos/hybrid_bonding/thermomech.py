@@ -14,6 +14,7 @@ from functools import partial
 import json
 import pandas as pd
 
+import numpy as np
 import seaborn as sb
 from matplotlib import pyplot as plt, scale
 import matplotlib.lines as pltlines
@@ -73,11 +74,12 @@ def hybrid_bonding_thermomech():
     # Define Prior Parameters
     #################################################################
     
-    # Using priors from SAC105 and Data from SnPb to see if model will update beliefs accordingly
-    e_f_prior = {'loc': 0.225, 'scale': 0.5}      # fatigue ductility coefficient
-    c_0_prior = {'loc': 0.480, 'scale': 0.1}  # base fatigue exponent
-    c_1_prior = {'loc': 9.30E-04, 'scale': 5E-4}   # temperature coefficient
-    c_2_prior = {'loc': -1.92E-02, 'scale': 5E-3}  # dwell time coefficient
+    # Using loose priors based on SnPb/SAC105 to allow data to drive inference
+    e_f_prior = {'loc': 0.225, 'scale': 0.2}      # fatigue ductility coefficient
+    c_0_prior = {'loc': 0.480, 'scale': 0.1}       # base fatigue exponent (average of SnPb/SAC105)
+    c_1_prior = {'loc': 9.30e-04, 'scale': 3E-04}   # temperature coefficient (average)
+    c_2_prior = {'loc': -1.92e-02, 'scale': 3E-03} # dwell time coefficient (average)
+
 
     print(f"  e_f:     loc={e_f_prior['loc']}, scale={e_f_prior['scale']}")
     print(f"  c_0:     loc={c_0_prior['loc']}, scale={c_0_prior['scale']}")
@@ -87,16 +89,18 @@ def hybrid_bonding_thermomech():
 
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
         m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
-        N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
+        N_f_50 = 0.5*jnp.power(2*e_f/delta_D, 1/m)
         return N_f_50
     
     def calc_log_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
-        """Return log of predicted Nf for LogNormal likelihood"""
-        N_f = calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D)
-        return jnp.log(N_f)
+        e_f, delta_D = jnp.maximum(e_f, 0.001), jnp.maximum(delta_D, 1e-8)
+        m = jnp.maximum(c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0/t_D), 0.1)
+        N_f = 0.5*jnp.power(jnp.maximum(2*e_f/delta_D, 1e-8), 1/m)
+        log_N_f = jnp.log(jnp.maximum(N_f, 1.0))
+        return jnp.where(jnp.isfinite(log_N_f), log_N_f, jnp.log(1e8))
     
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
-    mb.add_params(t_0=400, meas_var = 15) 
+    mb.add_params(t_0=400, meas_var = 7)  # Measurement variance in log 
     
     mb.add_hyperlatent('e_f_nom', dists.Normal, e_f_prior)
     mb.add_hyperlatent('c_0_nom', dists.Normal, c_0_prior)
@@ -116,7 +120,7 @@ def hybrid_bonding_thermomech():
 
     mb.add_observed(
         'nf_delta_D',
-        dists.LogNormal,
+        dists.Normal,  # Normal dist in log-space (not LogNormal)
         {'loc': 'log_engelmaier_nf', 'scale': 'meas_var'},
         1  # One observation per test condition
     )
@@ -146,11 +150,11 @@ def hybrid_bonding_thermomech():
     #################################################################
     start_time = time.time()
 
-    # Build measured_data with one entry per test point
+    # Build measured_data with log-transformed Nf (since we use Normal in log-space)
     measured_data = {}
     for i, nf_val in enumerate(Nf_data):
         test_name = f'test_{i}'
-        measured_data[test_name] = {'nf_delta_D': jnp.array([nf_val])}
+        measured_data[test_name] = {'nf_delta_D': jnp.array([jnp.log(float(nf_val))])}
 
     am.do_inference(measured_data)
     print(f'Inference completed in {time.time() - start_time:.2f} seconds')
@@ -161,7 +165,7 @@ def hybrid_bonding_thermomech():
     # -------- SAMPLE FROM POSTERIOR DISTRIBUTIONS -------------------
     #################################################################
     
-    rng_key = rand.key(999)
+    rng_key = rand.key(424242)
     posterior_samples = {}
     
     for hyl_name, hyl_params in am.relmdl.hyl_beliefs.items():
@@ -191,14 +195,8 @@ def hybrid_bonding_thermomech():
     Nf_hb_all = []
     
     for i in range(n_samples_posterior):
-        # Ensure parameters are positive
-        e_f = jnp.maximum(e_f_samples[i], 0.01)
-        c_0 = jnp.maximum(c_0_samples[i], 0.01)
-        c_1 = jnp.maximum(c_1_samples[i], 0.0001)
-        c_2 = c_2_samples[i]
-        
         Nf_hb = calc_engelmaier(
-            e_f, c_0, c_1, c_2,
+            e_f_samples[i], c_0_samples[i], c_1_samples[i], c_2_samples[i],
             t_0, T_sj, t_D, delta_D_range
         )
         Nf_hb_all.append(Nf_hb)
@@ -231,7 +229,6 @@ def hybrid_bonding_thermomech():
     c_0_mean = float(am.relmdl.hyl_beliefs['c_0_nom']['loc'])
     c_1_mean = float(am.relmdl.hyl_beliefs['c_1_nom']['loc'])
     c_2_mean = float(am.relmdl.hyl_beliefs['c_2_nom']['loc'])
-    
     
     # Calculate deterministic prediction using posterior means
     mean_pred_hb = calc_engelmaier(
@@ -341,11 +338,12 @@ def hybrid_bonding_thermomech():
     plt.savefig(filename_posterior, dpi=150, bbox_inches='tight')
     print(f"\nPosterior plot saved as '{filename_posterior}'")
     plt.show()
+
     #################################################################
     # -------- PLOT POSTERIOR PREDICTIONS WITH REFERENCE SOLDERS ------
     #################################################################
     
-    # Reference solder data (from sampling_results_reproduce.py)
+    # Reference solder data from Engelmaier Paper
     snpb_nom = {
         "e_f": 0.325,
         "c_0": 0.442,

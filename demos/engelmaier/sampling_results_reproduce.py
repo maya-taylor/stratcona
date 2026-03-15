@@ -29,7 +29,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 def calc_engelmaier_sac_snsg(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
     m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
-    N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
+    N_f_50 = 0.5*jnp.pow(2*e_f/delta_D)(1/m)
     return N_f_50
 
 # This function is for recreating the data found in Source #1 since it contained graphs
