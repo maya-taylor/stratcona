@@ -74,11 +74,10 @@ def hybrid_bonding_thermomech():
     # Define Prior Parameters
     #################################################################
     
-    # Using loose priors based on SnPb/SAC105 to allow data to drive inference
     e_f_prior = {'loc': 0.225, 'scale': 0.2}      # fatigue ductility coefficient
-    c_0_prior = {'loc': 0.480, 'scale': 0.1}       # base fatigue exponent (average of SnPb/SAC105)
-    c_1_prior = {'loc': 9.30e-04, 'scale': 3E-04}   # temperature coefficient (average)
-    c_2_prior = {'loc': -1.92e-02, 'scale': 3E-03} # dwell time coefficient (average)
+    c_0_prior = {'loc': 0.480, 'scale': 0.1}       # base fatigue exponent 
+    c_1_prior = {'loc': 9.30e-04, 'scale': 3E-04}   # temperature coefficient 
+    c_2_prior = {'loc': -1.92e-02, 'scale': 3E-03} # dwell time coefficient 
 
 
     print(f"  e_f:     loc={e_f_prior['loc']}, scale={e_f_prior['scale']}")
@@ -165,7 +164,7 @@ def hybrid_bonding_thermomech():
     # -------- SAMPLE FROM POSTERIOR DISTRIBUTIONS -------------------
     #################################################################
     
-    rng_key = rand.key(424242)
+    rng_key = rand.key(42424242)
     posterior_samples = {}
     
     for hyl_name, hyl_params in am.relmdl.hyl_beliefs.items():
