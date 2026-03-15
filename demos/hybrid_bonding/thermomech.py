@@ -96,7 +96,7 @@ def hybrid_bonding_thermomech():
         return jnp.log(N_f)
     
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
-    mb.add_params(t_0=400, meas_var = 1E5)  # Measurement variance in log-space (reasonable for data uncertainty)
+    mb.add_params(t_0=400, meas_var = 15) 
     
     mb.add_hyperlatent('e_f_nom', dists.Normal, e_f_prior)
     mb.add_hyperlatent('c_0_nom', dists.Normal, c_0_prior)
@@ -116,7 +116,7 @@ def hybrid_bonding_thermomech():
 
     mb.add_observed(
         'nf_delta_D',
-        dists.Normal,
+        dists.LogNormal,
         {'loc': 'log_engelmaier_nf', 'scale': 'meas_var'},
         1  # One observation per test condition
     )
@@ -211,8 +211,8 @@ def hybrid_bonding_thermomech():
     # Compute summary statistics
     def summarize(samples):
         mean = jnp.mean(samples, axis=0)
-        lower = jnp.percentile(samples, 5, axis=0)
-        upper = jnp.percentile(samples, 95, axis=0)
+        lower = jnp.percentile(samples, 2.5, axis=0)
+        upper = jnp.percentile(samples, 97.5, axis=0)
         return mean, lower, upper
     
     mean_hb, low_hb, high_hb = summarize(Nf_hb_all)
@@ -257,7 +257,7 @@ def hybrid_bonding_thermomech():
         100*delta_D_range,
         color="purple",
         linewidth=3,
-        label="HB Posterior Mean"
+        label="Posterior Mean"
     )
     
     # ---- Hybrid Bonding (posterior ensemble) ----
@@ -267,7 +267,7 @@ def hybrid_bonding_thermomech():
         color="purple",
         linewidth=1.5,
         linestyle=":",
-        label="HB Ensemble Mean",
+        label="Posterior 95% CI",
         alpha=0.7
     )
     
@@ -332,7 +332,7 @@ def hybrid_bonding_thermomech():
     
     plt.xlabel("Mean Cycles to Failure (Nf, 50%)", fontsize=12)
     plt.ylabel("Inelastic Strain Range (ΔD, %)", fontsize=12)
-    plt.title("Hybrid Bonding - Engelmaier Model Posterior", fontsize=14, fontweight='bold')
+    plt.title("Posterior vs SAC105 and SnPb (Posterior should be SnPb)", fontsize=14, fontweight='bold')
     plt.legend(fontsize=11)
     plt.grid(True, which="both", alpha=0.3)
     plt.tight_layout()
@@ -419,9 +419,7 @@ def hybrid_bonding_thermomech():
     
     Nf_snpb_all = jnp.stack(Nf_snpb_all)
     Nf_sac105_all = jnp.stack(Nf_sac105_all)
-    
-    mean_snpb, low_snpb, high_snpb = summarize(Nf_snpb_all)
-    mean_sac105, low_sac105, high_sac105 = summarize(Nf_sac105_all)
+
     
     #################################################################
     # -------- PLOT POSTERIOR DISTRIBUTIONS WITH PRIORS ---------------
@@ -442,8 +440,6 @@ def hybrid_bonding_thermomech():
         'c_1_nom': 6.00e-04,
         'c_2_nom': -1.74e-02
     }
-
-    model_mode = "Hybrid Bonding Thermomechanical Model"
 
     n_vars = len(posterior_samples)
     fig, axes = plt.subplots((n_vars + 1) // 2, 2, figsize=(12, 3 * ((n_vars + 1) // 2)))
@@ -477,7 +473,7 @@ def hybrid_bonding_thermomech():
     for idx in range(n_vars, len(axes)):
         fig.delaxes(axes[idx])
     
-    fig.suptitle(model_mode, fontsize=14, fontweight='bold', y=0.995)
+    fig.suptitle("Model", fontsize=14, fontweight='bold', y=0.995)
     
     plt.tight_layout()
     filename = 'posterior_distributions.png'
