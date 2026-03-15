@@ -42,10 +42,8 @@ def hybrid_bonding_thermomech():
     ###########################################
 
     # Pairs of points [ % delta_D, Nf (means cycles to failure)]
-    # Tried to read of figure 10 from the paper but was guesstimating points
-    # delta_D_Nfdata = [[11, 10], [9, 10E2], [1.8,10E3], [0.6,10E4], [0.2,10E5], [0.07, 10E6]] #this was bad data
 
-    # Using data read of the SnPb plot I generated
+    # Using data read of the SnPb plot I generated (which matches fig 10 of paper)
     delta_D_Nfdata = [[0.16263, 10], [0.0581, 10E2], [0.01916,10E3], [0.00657,10E4], [0.00228,10E5], [0.00078, 10E6]]
 
     # Convert fabricated data to arrays
@@ -86,16 +84,21 @@ def hybrid_bonding_thermomech():
     print(f"  c_2:     loc={c_2_prior['loc']}, scale={c_2_prior['scale']}")
     print()
 
+    # caution: values are not clipped or restricted!
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
         m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
         N_f_50 = 0.5*jnp.power(2*e_f/delta_D, 1/m)
         return N_f_50
     
+    # needed to restrict values to prevent inf/nan from causing divergences
+    # want to constrain our variables to be in a reasonable range for them
     def calc_log_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
-        e_f, delta_D = jnp.maximum(e_f, 0.001), jnp.maximum(delta_D, 1e-8)
-        m = jnp.maximum(c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0/t_D), 0.1)
-        N_f = 0.5*jnp.power(jnp.maximum(2*e_f/delta_D, 1e-8), 1/m)
-        log_N_f = jnp.log(jnp.maximum(N_f, 1.0))
+        e_f, delta_D = jnp.maximum(e_f, 0.001), jnp.maximum(delta_D, 1e-8) # basically restricting to positive values (this realistically cannot be neg)
+        m = jnp.maximum(c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0/t_D), 0.1) # normally m is around 0.5, should be solidly around there
+        # if i clip m at less that 0.1 this starts diverging a lot, i think a 0.1 clip is reasonable for this application
+        # if we want to produce reasonable results, I could also just clip each of the components of m
+        N_f = 0.5*jnp.power(jnp.maximum(2*e_f/delta_D, 1e-8), 1/m) # this is just to keep it positive
+        log_N_f = jnp.log(jnp.maximum(N_f, 1.0)) # prevent negative numbers
         return jnp.where(jnp.isfinite(log_N_f), log_N_f, jnp.log(1e8))
     
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
@@ -113,9 +116,8 @@ def hybrid_bonding_thermomech():
     mb.add_latent('c_1', nom='c_1_nom')
     mb.add_latent('c_2', nom='c_2_nom')
     
+    # using a log since the range of Nf data is very large
     mb.add_intermediate('log_engelmaier_nf', calc_log_engelmaier)
-    #mb.add_intermediate('engelmaier_nf', calc_engelmaier)
-
 
     mb.add_observed(
         'nf_delta_D',
@@ -179,6 +181,7 @@ def hybrid_bonding_thermomech():
     #################################################################
     
     # Generate Nf predictions across delta_D range using posterior samples
+    # Recreating the sampling reproduce plot from Engelmaier paper for SnPb and SAC105 for comparison
     delta_D_range = jnp.logspace(-4, 0, 1000)
     T_sj = 50
     t_D = 600
@@ -204,6 +207,9 @@ def hybrid_bonding_thermomech():
     
     # Replace inf/nan with reasonable values for visualization
     Nf_hb_all = jnp.where(jnp.isfinite(Nf_hb_all), Nf_hb_all, 1e10)
+    # want to keep track of how many inf/nan values needed to be replaced to make sure sampling is ok
+    n_inf_replaced = jnp.sum(~jnp.isfinite(Nf_hb_all))
+    print(f"Number of inf/nan values replaced: {n_inf_replaced}")
     
     # Compute summary statistics
     def summarize(samples):
@@ -213,11 +219,6 @@ def hybrid_bonding_thermomech():
         return mean, lower, upper
     
     mean_hb, low_hb, high_hb = summarize(Nf_hb_all)
-    
-    # Replace remaining inf values
-    mean_hb = jnp.where(jnp.isfinite(mean_hb), mean_hb, 1e10)
-    low_hb = jnp.where(jnp.isfinite(low_hb), low_hb, 1e1)
-    high_hb = jnp.where(jnp.isfinite(high_hb), high_hb, 1e10)
     
     #################################################################
     # -------- COMPUTE MEAN PREDICTION FROM POSTERIOR MEANS ----------
@@ -230,6 +231,7 @@ def hybrid_bonding_thermomech():
     c_2_mean = float(am.relmdl.hyl_beliefs['c_2_nom']['loc'])
     
     # Calculate deterministic prediction using posterior means
+    # recall calc_engelmaier currently does not clip inf values
     mean_pred_hb = calc_engelmaier(
         e_f_mean, c_0_mean, c_1_mean, c_2_mean,
         t_0, T_sj, t_D, delta_D_range
@@ -247,7 +249,7 @@ def hybrid_bonding_thermomech():
     
     plt.figure(figsize=(8, 6))
     
-    # ---- Hybrid Bonding (posterior mean from distribution means) ----
+    # ---- Posterior Mean ----
     plt.plot(
         mean_pred_hb,
         100*delta_D_range,
@@ -256,7 +258,7 @@ def hybrid_bonding_thermomech():
         label="Posterior Mean"
     )
     
-    # ---- Hybrid Bonding (posterior ensemble) ----
+    # ---- Posterior CI ----
     plt.plot(
         mean_hb,
         100*delta_D_range,
@@ -279,6 +281,7 @@ def hybrid_bonding_thermomech():
     plt.plot(high_hb, 100*delta_D_range, color="purple", linestyle="--", linewidth=1, alpha=0.6)
     
     # ---- SnPb Mean (reference) ----
+    # these are the values that my posterior should find
     snpb_nom_vals = {
         "e_f": 0.325,
         "c_0": 0.442,
@@ -376,6 +379,8 @@ def hybrid_bonding_thermomech():
     }
     
     # Generate reference predictions
+    # for now, this isn't really needed since I am just graphing the mean that should be stable
+    # but I might want to use the prior vs posterior variance so this is set-up
     def sample_params(key, nom_dict, sigma_dict):
         keys = rand.split(key, len(nom_dict))
         sampled = {}
@@ -391,22 +396,18 @@ def hybrid_bonding_thermomech():
     Nf_sac105_all = []
     
     keys = rand.split(rng_key_ref, n_ref_samples)
-    
-    def calc_engelmaier_ref(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
-        m = c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D)
-        N_f_50 = 0.5*(2*e_f/delta_D)**(1/m)
-        return N_f_50
+
     
     for i in range(n_ref_samples):
         p_snpb = sample_params(keys[i], snpb_nom, snpb_sigma)
         p_sac105 = sample_params(keys[i], sac105_nom, sac105_sigma)
         
-        Nf_snpb = calc_engelmaier_ref(
+        Nf_snpb = calc_engelmaier(
             p_snpb["e_f"], p_snpb["c_0"], p_snpb["c1"], p_snpb["c2"],
             p_snpb["t_0"], T_sj, t_D, delta_D_range
         )
         
-        Nf_sac105 = calc_engelmaier_ref(
+        Nf_sac105 = calc_engelmaier(
             p_sac105["e_f"], p_sac105["c_0"], p_sac105["c1"], p_sac105["c2"],
             p_sac105["t_0"], T_sj, t_D, delta_D_range
         )
@@ -422,7 +423,7 @@ def hybrid_bonding_thermomech():
     # -------- PLOT POSTERIOR DISTRIBUTIONS WITH PRIORS ---------------
     #################################################################
     
-    # Use the same prior parameters defined earlier for consistency
+    # Use the same prior parameters defined earlier
     prior_specs = {
         'e_f_nom': e_f_prior,
         'c_0_nom': c_0_prior,
