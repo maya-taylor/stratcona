@@ -58,13 +58,13 @@ def generate_data():
         delta_D_cond1.append(float(delta_d))
         print(f"  N_f={nf:.0e} -> delta_D={float(delta_d):.6f}")
     
-    # Condition 2: T_sj=100, t_D=600
-    print("\nCondition 2: T_sj=100, t_D=600")
+    # Condition 2: T_sj=150, t_D=600
+    print("\nCondition 2: T_sj=150, t_D=600")
     delta_D_cond2 = []
     for nf in target_Nf:
         delta_d = calc_delta_D(
             snpb_nom["e_f"], snpb_nom["c_0"], snpb_nom["c_1"], snpb_nom["c_2"],
-            snpb_nom["t_0"], T_sj=100, t_D=600, N_f_target=nf
+            snpb_nom["t_0"], T_sj=150, t_D=600, N_f_target=nf
         )
         delta_D_cond2.append(float(delta_d))
         print(f"  N_f={nf:.0e} -> delta_D={float(delta_d):.6f}")
@@ -83,7 +83,7 @@ def generate_data():
     print("\nData for thermomech.py:")
     print("Condition 1: T_sj=50, t_D=600")
     print(f"delta_D_Nfdata_cond1 = {[[delta_D_cond1[i], float(target_Nf[i])] for i in range(len(target_Nf))]}")
-    print("\nCondition 2: T_sj=100, t_D=600")
+    print("\nCondition 2: T_sj=150, t_D=600")
     print(f"delta_D_Nfdata_cond2 = {[[delta_D_cond2[i], float(target_Nf[i])] for i in range(len(target_Nf))]}")
     print("\nCondition 3: T_sj=40, t_D=300")
     print(f"delta_D_Nfdata_cond3 = {[[delta_D_cond3[i], float(target_Nf[i])] for i in range(len(target_Nf))]}")

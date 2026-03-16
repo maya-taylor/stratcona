@@ -31,12 +31,19 @@ import stratcona
 # Plan for this code --> just use parameters from one of the types of solder to set-up a model
 # Then try to figure out parameters that work for hybrid bonding set-up... later problem!
 
-
 def hybrid_bonding_thermomech():
     """
     Fit Engelmaier thermomechanical fatigue model to hybrid bonding data.
     Modify the prior dictionaries below to test different parameter constraints.
     """
+    ###################################################################################
+    # Fitting Settings
+    ###################################################################################
+    USE_SCALED_PRIORS = 1
+    if USE_SCALED_PRIORS:
+        print("Using SCALED priors (c_1 and c_2 scaled up for better numerical stability)")
+    
+
     ##########################################
     # My Fabricated Experimental Data Here
     ###########################################
@@ -48,8 +55,8 @@ def hybrid_bonding_thermomech():
     delta_D_data_cond1 = jnp.array([pt[0] for pt in delta_D_Nfdata_cond1])
     Nf_data_cond1 = jnp.array([pt[1] for pt in delta_D_Nfdata_cond1])
     
-    # Condition 2: T_sj=100, t_D=600
-    delta_D_Nfdata_cond2 = [[0.14805947244167328, 10.0], [0.04749132692813873, 100.0], [0.015233243815600872, 1000.0], [0.004886191338300705, 10000.0], [0.001567287021316588, 100000.0], [0.0005027205334044993, 1000000.0]]
+    # Condition 2: T_sj=150, t_D=600
+    delta_D_Nfdata_cond2 = delta_D_Nfdata_cond2 = [[0.13533349335193634, 10.0], [0.04051196575164795, 100.0], [0.012127222493290901, 1000.0], [0.003630273975431919, 10000.0], [0.0010867195669561625, 100000.0], [0.0003253085887990892, 1000000.0]]
     delta_D_data_cond2 = jnp.array([pt[0] for pt in delta_D_Nfdata_cond2])
     Nf_data_cond2 = jnp.array([pt[1] for pt in delta_D_Nfdata_cond2])
 
@@ -81,10 +88,17 @@ def hybrid_bonding_thermomech():
     
     e_f_prior = {'loc': 0.225, 'scale': 0.2}      # fatigue ductility coefficient
     c_0_prior = {'loc': 0.480, 'scale': 0.1}       # base fatigue exponent 
-    c_1_prior = {'loc': 9.30e-04, 'scale': 3E-04}   # temperature coefficient 
-    c_2_prior = {'loc': -1.92e-02, 'scale': 3E-03} # dwell time coefficient 
-    # c_1_prior = {'loc': 0.93, 'scale': 0.3}   # SCALED: temperature coefficient 
-    # c_2_prior = {'loc': -0.192, 'scale': 0.3}  # SCALED: dwell time coefficient 
+    c_1_prior_default = {'loc': 9.30e-04, 'scale': 1E-03}   # temperature coefficient 
+    c_2_prior_default = {'loc': -1.92e-02, 'scale': 1E-01} # dwell time coefficient 
+    c_1_prior_scaled = {'loc': 9.30E-04*1E3, 'scale': 1E-03*1E3}   # SCALED: temperature coefficient 
+    c_2_prior_scaled = {'loc': -1.92e-02*1E1, 'scale': 1E-01*1E1}  # SCALED: dwell time coefficient 
+
+    if USE_SCALED_PRIORS:
+        c_1_prior = c_1_prior_scaled
+        c_2_prior = c_2_prior_scaled
+    else:
+        c_1_prior = c_1_prior_default
+        c_2_prior = c_2_prior_default
 
     print(f"  e_f:     loc={e_f_prior['loc']}, scale={e_f_prior['scale']}")
     print(f"  c_0:     loc={c_0_prior['loc']}, scale={c_0_prior['scale']}")
@@ -95,6 +109,11 @@ def hybrid_bonding_thermomech():
     # caution: values are not clipped or restricted!
     def calc_engelmaier(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
         m =  c_0 + c_1*T_sj + c_2*jnp.log(1 + t_0 / t_D) 
+        N_f_50 = 0.5*jnp.power(2*e_f/delta_D, 1/m)
+        return N_f_50
+    
+    def calc_engelmaier_scaled(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
+        m =  c_0 + c_1*1E-3*T_sj + c_2*1E-1*jnp.log(1 + t_0 / t_D) 
         N_f_50 = 0.5*jnp.power(2*e_f/delta_D, 1/m)
         return N_f_50
     
@@ -137,7 +156,10 @@ def hybrid_bonding_thermomech():
     mb.add_latent('c_2', nom='c_2_nom')
     
     # using a log since the range of Nf data is very large
-    mb.add_intermediate('log_engelmaier_nf', calc_log_engelmaier)
+    if USE_SCALED_PRIORS:
+        mb.add_intermediate('log_engelmaier_nf', calc_log_engelmaier_scaled)
+    else:
+        mb.add_intermediate('log_engelmaier_nf', calc_log_engelmaier)
 
     mb.add_observed(
         'nf_delta_D',
@@ -162,11 +184,11 @@ def hybrid_bonding_thermomech():
         test_conds[test_name] = {'lot': 1, 'chp': 1}
         cond_params[test_name] = {'T_sj': 50, 't_D': 600, 'delta_D': float(delta_D_val)}
     
-    # Condition 2: T_sj=100, t_D=600
+    # Condition 2: T_sj=150, t_D=600
     for i, delta_D_val in enumerate(delta_D_data_cond2):
         test_name = f'cond2_test_{i}'
         test_conds[test_name] = {'lot': 1, 'chp': 1}
-        cond_params[test_name] = {'T_sj': 100, 't_D': 600, 'delta_D': float(delta_D_val)}
+        cond_params[test_name] = {'T_sj': 150, 't_D': 600, 'delta_D': float(delta_D_val)}
     
     # Condition 3: T_sj=40, t_D=300
     for i, delta_D_val in enumerate(delta_D_data_cond3):
@@ -240,10 +262,16 @@ def hybrid_bonding_thermomech():
     Nf_hb_all = []
     
     for i in range(n_samples_posterior):
-        Nf_hb = calc_engelmaier(
-            e_f_samples[i], c_0_samples[i], c_1_samples[i], c_2_samples[i],
-            t_0, T_sj, t_D, delta_D_range
-        )
+        if USE_SCALED_PRIORS:
+            Nf_hb = calc_engelmaier_scaled(
+                e_f_samples[i], c_0_samples[i], c_1_samples[i], c_2_samples[i],
+                t_0, T_sj, t_D, delta_D_range
+            )
+        else:
+            Nf_hb = calc_engelmaier(
+                e_f_samples[i], c_0_samples[i], c_1_samples[i], c_2_samples[i],
+                t_0, T_sj, t_D, delta_D_range
+            )
         Nf_hb_all.append(Nf_hb)
     
     Nf_hb_all = jnp.stack(Nf_hb_all)
@@ -275,10 +303,16 @@ def hybrid_bonding_thermomech():
     
     # Calculate deterministic prediction using posterior means
     # recall calc_engelmaier currently does not clip inf values
-    mean_pred_hb = calc_engelmaier(
-        e_f_mean, c_0_mean, c_1_mean, c_2_mean,
-        t_0, T_sj, t_D, delta_D_range
-    )
+    if USE_SCALED_PRIORS:
+        mean_pred_hb = calc_engelmaier_scaled(
+            e_f_mean, c_0_mean, c_1_mean, c_2_mean,
+            t_0, T_sj, t_D, delta_D_range
+        )
+    else:
+        mean_pred_hb = calc_engelmaier(
+            e_f_mean, c_0_mean, c_1_mean, c_2_mean,
+            t_0, T_sj, t_D, delta_D_range
+        )
     
     print(f"\nPosterior mean parameters:")
     print(f"  e_f: {e_f_mean:.6f}")
@@ -480,12 +514,22 @@ def hybrid_bonding_thermomech():
     }
     
     # Expected nominal values from SnPb solder data
-    nominal_values = {
-        'e_f_nom': 0.325,
-        'c_0_nom': 0.442,
-        'c_1_nom': 6.00e-04,
-        'c_2_nom': -1.74e-02
-    }
+    if USE_SCALED_PRIORS:
+        nominal_values = {
+            'e_f_nom': 0.325,
+            'c_0_nom': 0.442,
+            'c_1_nom': 6.00e-04*1E3,
+            'c_2_nom': -1.74e-02*1E1
+        }
+    else:
+        nominal_values = {
+            'e_f_nom': 0.325,
+            'c_0_nom': 0.442,
+            'c_1_nom': 6.00e-04,
+            'c_2_nom': -1.74e-02
+        }
+        
+
 
     n_vars = len(posterior_samples)
     fig, axes = plt.subplots((n_vars + 1) // 2, 2, figsize=(12, 3 * ((n_vars + 1) // 2)))
@@ -511,6 +555,8 @@ def hybrid_bonding_thermomech():
         
         ax.set_xlabel(hyl_name)
         ax.set_ylabel('Density')
+        if USE_SCALED_PRIORS and hyl_name in ['c_1_nom', 'c_2_nom']:
+            ax.set_xlabel(f"{hyl_name} (SCALED)")
         ax.set_title(f'{hyl_name}: Prior vs Posterior')
         ax.legend()
         ax.grid(True, alpha=0.3)
