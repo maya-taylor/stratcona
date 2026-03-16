@@ -43,14 +43,21 @@ def hybrid_bonding_thermomech():
 
     # Pairs of points [ % delta_D, Nf (means cycles to failure)]
 
-    # Using data read of the SnPb plot I generated (which matches fig 10 of paper)
-    delta_D_Nfdata = [[0.16263, 10], [0.0581, 10E2], [0.01916,10E3], [0.00657,10E4], [0.00228,10E5], [0.00078, 10E6]]
+    # Condition 1: T_sj=50, t_D=600
+    delta_D_Nfdata_cond1 = [[0.16198211908340454, 10.0], [0.055673062801361084, 100.0], [0.0191347673535347, 1000.0], [0.006576597224920988, 10000.0], [0.0022603687830269337, 100000.0], [0.0007768860668875277, 1000000.0]]
+    delta_D_data_cond1 = jnp.array([pt[0] for pt in delta_D_Nfdata_cond1])
+    Nf_data_cond1 = jnp.array([pt[1] for pt in delta_D_Nfdata_cond1])
+    
+    # Condition 2: T_sj=100, t_D=600
+    delta_D_Nfdata_cond2 = [[0.14805947244167328, 10.0], [0.04749132692813873, 100.0], [0.015233243815600872, 1000.0], [0.004886191338300705, 10000.0], [0.001567287021316588, 100000.0], [0.0005027205334044993, 1000000.0]]
+    delta_D_data_cond2 = jnp.array([pt[0] for pt in delta_D_Nfdata_cond2])
+    Nf_data_cond2 = jnp.array([pt[1] for pt in delta_D_Nfdata_cond2])
 
-    # Convert fabricated data to arrays
-    delta_D_data = jnp.array([pt[0] for pt in delta_D_Nfdata])
-    Nf_data      = jnp.array([pt[1] for pt in delta_D_Nfdata])
+    # Condition 3: T_sj=40, t_D=300
+    delta_D_Nfdata_cond3 = [[0.16768045723438263, 10.0], [0.05918363109230995, 100.0], [0.020889149978756905, 1000.0], [0.007372927851974964, 10000.0], [0.0026023108512163162, 100000.0], [0.0009184982627630234, 1000000.0]]  
+    delta_D_data_cond3 = jnp.array([pt[0] for pt in delta_D_Nfdata_cond3])
+    Nf_data_cond3 = jnp.array([pt[1] for pt in delta_D_Nfdata_cond3])
 
-    Nf_avg = jnp.mean(Nf_data)
 
     ########################################################
     # Defining the Model
@@ -76,7 +83,8 @@ def hybrid_bonding_thermomech():
     c_0_prior = {'loc': 0.480, 'scale': 0.1}       # base fatigue exponent 
     c_1_prior = {'loc': 9.30e-04, 'scale': 3E-04}   # temperature coefficient 
     c_2_prior = {'loc': -1.92e-02, 'scale': 3E-03} # dwell time coefficient 
-
+    # c_1_prior = {'loc': 0.93, 'scale': 0.3}   # SCALED: temperature coefficient 
+    # c_2_prior = {'loc': -0.192, 'scale': 0.3}  # SCALED: dwell time coefficient 
 
     print(f"  e_f:     loc={e_f_prior['loc']}, scale={e_f_prior['scale']}")
     print(f"  c_0:     loc={c_0_prior['loc']}, scale={c_0_prior['scale']}")
@@ -101,8 +109,20 @@ def hybrid_bonding_thermomech():
         log_N_f = jnp.log(jnp.maximum(N_f, 1.0)) # prevent negative numbers
         return jnp.where(jnp.isfinite(log_N_f), log_N_f, jnp.log(1e8))
     
+        
+    # needed to restrict values to prevent inf/nan from causing divergences
+    # want to constrain our variables to be in a reasonable range for them
+    def calc_log_engelmaier_scaled(e_f, c_0, c_1, c_2, t_0, T_sj, t_D, delta_D):
+        e_f, delta_D = jnp.maximum(e_f, 0.001), jnp.maximum(delta_D, 1e-8) # basically restricting to positive values (this realistically cannot be neg)
+        m = jnp.maximum(c_0 + c_1*1E-3*T_sj + c_2*1E-1*jnp.log(1 + t_0/t_D), 0.1) # normally m is around 0.5, should be solidly around there
+        # if i clip m at less that 0.1 this starts diverging a lot, i think a 0.1 clip is reasonable for this application
+        # if we want to produce reasonable results, I could also just clip each of the components of m
+        N_f = 0.5*jnp.power(jnp.maximum(2*e_f/delta_D, 1e-8), 1/m) # this is just to keep it positive
+        log_N_f = jnp.log(jnp.maximum(N_f, 1.0)) # prevent negative numbers
+        return jnp.where(jnp.isfinite(log_N_f), log_N_f, jnp.log(1e8))
+    
     mb = stratcona.SPMBuilder(mdl_name='hb_engelmaier')
-    mb.add_params(t_0=400, meas_var = 7)  # Measurement variance in log 
+    mb.add_params(t_0=400, meas_var = 5)  # Measurement variance in log 
     
     mb.add_hyperlatent('e_f_nom', dists.Normal, e_f_prior)
     mb.add_hyperlatent('c_0_nom', dists.Normal, c_0_prior)
@@ -132,16 +152,27 @@ def hybrid_bonding_thermomech():
     # Define how the data was collected
     #################################################################
 
-    # Create a separate test condition for each delta_D value
+    # Create a separate test condition for each delta_D value in both conditions
     test_conds = {}
-    for i, delta_D_val in enumerate(delta_D_data):
-        test_name = f'test_{i}'
-        test_conds[test_name] = {'lot': 1, 'chp': 1}
-    
     cond_params = {}
-    for i, delta_D_val in enumerate(delta_D_data):
-        test_name = f'test_{i}'
+    
+    # Condition 1: T_sj=50, t_D=600
+    for i, delta_D_val in enumerate(delta_D_data_cond1):
+        test_name = f'cond1_test_{i}'
+        test_conds[test_name] = {'lot': 1, 'chp': 1}
         cond_params[test_name] = {'T_sj': 50, 't_D': 600, 'delta_D': float(delta_D_val)}
+    
+    # Condition 2: T_sj=100, t_D=600
+    for i, delta_D_val in enumerate(delta_D_data_cond2):
+        test_name = f'cond2_test_{i}'
+        test_conds[test_name] = {'lot': 1, 'chp': 1}
+        cond_params[test_name] = {'T_sj': 100, 't_D': 600, 'delta_D': float(delta_D_val)}
+    
+    # Condition 3: T_sj=40, t_D=300
+    for i, delta_D_val in enumerate(delta_D_data_cond3):
+        test_name = f'cond3_test_{i}'
+        test_conds[test_name] = {'lot': 1, 'chp': 1}
+        cond_params[test_name] = {'T_sj': 40, 't_D': 300, 'delta_D': float(delta_D_val)}
     
     accel_test = stratcona.TestDef('accel_test', test_conds, cond_params)
     am.set_test_definition(accel_test)
@@ -153,9 +184,21 @@ def hybrid_bonding_thermomech():
 
     # Build measured_data with log-transformed Nf (since we use Normal in log-space)
     measured_data = {}
-    for i, nf_val in enumerate(Nf_data):
-        test_name = f'test_{i}'
-        measured_data[test_name] = {'nf_delta_D': jnp.array([jnp.log(float(nf_val))])}
+    
+    # Condition 1 data
+    for i, nf_val in enumerate(Nf_data_cond1):
+        test_name = f'cond1_test_{i}'
+        measured_data[test_name] = {'nf_delta_D': jnp.array([[[jnp.log(float(nf_val))]]])}
+    
+    # Condition 2 data
+    for i, nf_val in enumerate(Nf_data_cond2):
+        test_name = f'cond2_test_{i}'
+        measured_data[test_name] = {'nf_delta_D': jnp.array([[[jnp.log(float(nf_val))]]])}
+    
+    # Condition 3 data
+    for i, nf_val in enumerate(Nf_data_cond3):
+        test_name = f'cond3_test_{i}'
+        measured_data[test_name] = {'nf_delta_D': jnp.array([[[jnp.log(float(nf_val))]]])}
 
     am.do_inference(measured_data)
     print(f'Inference completed in {time.time() - start_time:.2f} seconds')
@@ -324,6 +367,11 @@ def hybrid_bonding_thermomech():
         linewidth=2.5,
         label="SAC105 Mean"
     )
+    
+    # ---- Data Points (all conditions) ----
+    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="red", s=100, marker="o", label="Data Cond1 (T=50,t=600)", zorder=5)
+    plt.scatter(Nf_data_cond2, 100*delta_D_data_cond2, color="orange", s=100, marker="s", label="Data Cond2 (T=60,t=500)", zorder=5)
+    plt.scatter(Nf_data_cond3, 100*delta_D_data_cond3, color="brown", s=100, marker="^", label="Data Cond3 (T=40,t=300)", zorder=5)
     
     plt.xscale("log")
     plt.yscale("log")

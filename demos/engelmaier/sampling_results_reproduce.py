@@ -243,6 +243,7 @@ def run_engelmaier_sac_snsg_mc(
         plt.text(mean_snpb[idx_snpb], delta_d_value, f'  ($10^{{{power}}}$, {delta_d_value:.3f}%)', 
                 fontsize=9, color="blue", va='center', ha='left')
         
+        
     plt.legend()
     plt.grid(True, which="both")
     plt.tight_layout()
