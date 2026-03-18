@@ -30,6 +30,7 @@ import stratcona
 
 # Plan for this code --> just use parameters from one of the types of solder to set-up a model
 # Then try to figure out parameters that work for hybrid bonding set-up... later problem!
+ENTROPY_SAMPLES = 100_000
 
 def hybrid_bonding_thermomech():
     """
@@ -93,7 +94,7 @@ def hybrid_bonding_thermomech():
     c_1_prior_scaled = {'loc': 9.30E-04*1E3, 'scale': 1E-03*1E3}   # SCALED: temperature coefficient 
     c_2_prior_scaled = {'loc': -1.92e-02*1E1, 'scale': 1E-01*1E1}  # SCALED: dwell time coefficient 
 
-    if USE_SCALED_PRIORS:
+    if USE_SCALED_PRIORS:   
         c_1_prior = c_1_prior_scaled
         c_2_prior = c_2_prior_scaled
     else:
@@ -200,6 +201,23 @@ def hybrid_bonding_thermomech():
     am.set_test_definition(accel_test)
 
     #################################################################
+    # -------- PRIOR ENTROPY CALCULATION ---------------------------
+    #################################################################
+    def lp_f(vals, site, key, test):
+        return am.relmdl.logprob(key, test.dims, test.conds, {site: vals}, None, (len(vals),))
+
+    k1, k2 = rand.split(rand.key(9273036857), 2)
+    hyl_samples_prior = am.relmdl.sample(k1, accel_test.dims, accel_test.conds, (ENTROPY_SAMPLES,))
+    hyls = ['e_f_nom', 'c_0_nom', 'c_1_nom', 'c_2_nom']
+    pri_samples, pri_entropy = {}, {}
+    for hyl in hyls:
+        pri_samples[hyl] = hyl_samples_prior[hyl]
+        pri_entropy[hyl] = stratcona.engine.bed.entropy(
+            pri_samples[hyl], partial(lp_f, site=hyl, test=accel_test, key=k1))
+    
+    print("Prior entropies computed.")
+
+    #################################################################
     # -------- INFERENCE ON THE MODEL -----------------------------
     #################################################################
     start_time = time.time()
@@ -226,6 +244,23 @@ def hybrid_bonding_thermomech():
     print(f'Inference completed in {time.time() - start_time:.2f} seconds')
     print("Posterior hyper-latent beliefs:")
     print(am.relmdl.hyl_beliefs)
+
+    #################################################################
+    # -------- POSTERIOR ENTROPY CALCULATION -------------------------
+    #################################################################
+    k1, k2 = rand.split(rand.key(9296245908724), 2)
+    hyl_samples_posterior = am.relmdl.sample(k1, accel_test.dims, accel_test.conds, (ENTROPY_SAMPLES,))
+    pst_samples, pst_entropy = {}, {}
+    for hyl in hyls:
+        pst_samples[hyl] = hyl_samples_posterior[hyl]
+        pst_entropy[hyl] = stratcona.engine.bed.entropy(
+            pst_samples[hyl], partial(lp_f, site=hyl, test=accel_test, key=k1))
+
+    hyl_ig = {}
+    for hyl in hyls:
+        hyl_ig[hyl] = pri_entropy[hyl] - pst_entropy[hyl]
+    
+    print("Posterior entropies computed and information gain calculated.")
 
     #################################################################
     # -------- SAMPLE FROM POSTERIOR DISTRIBUTIONS -------------------
@@ -571,6 +606,76 @@ def hybrid_bonding_thermomech():
     filename = 'posterior_distributions.png'
     plt.savefig(filename, dpi=150, bbox_inches='tight')
     print(f"\nPlot saved as '{filename}'")
+    plt.show()
+
+    #################################################################
+    # -------- PRIOR vs POSTERIOR ENTROPY VIOLIN PLOTS ---------------
+    #################################################################
+    
+    sb.set_context('notebook')
+    sb.set_theme(style='ticks', font='Times New Roman')
+    
+    fig, p = plt.subplots(1, 1, figsize=(10, 6))
+    display_map = {
+        'e_f_nom': '$\\mu_{e_f}$',
+        'c_0_nom': '$\\mu_{c_0}$',
+        'c_1_nom': '$\\mu_{c_1}$',
+        'c_2_nom': '$\\mu_{c_2}$'
+    }
+    
+    # Create DataFrame combining prior and posterior samples
+    df_list = []
+    for hyl in hyls:
+        hyl_df = pd.DataFrame(pri_samples[hyl], columns=['val'])
+        hyl_df['hyl'] = display_map[hyl]
+        hyl_df['pri-pst'] = 'Prior'
+        df_list.append(hyl_df)
+    for hyl in hyls:
+        hyl_df = pd.DataFrame(pst_samples[hyl], columns=['val'])
+        hyl_df['hyl'] = display_map[hyl]
+        hyl_df['pri-pst'] = 'Posterior'
+        df_list.append(hyl_df)
+    df_violin = pd.concat(df_list, ignore_index=True)
+    
+    # Create violin plot
+    sb.violinplot(
+        df_violin, x='val', y='hyl', ax=p, split=True, density_norm='count',
+        hue='pri-pst', inner='quart', palette=['skyblue', 'darkblue'], linewidth=1.25
+    )
+    for fill in p.collections:
+        fill.set_alpha(0.75)
+    
+    plt.rcParams['mathtext.fontset'] = 'custom'
+    plt.rcParams['mathtext.rm'] = 'Times New Roman'
+    plt.rcParams['mathtext.it'] = 'Times New Roman'
+    plt.rcParams['font.family'] = 'Times New Roman'
+    
+    # Add text annotations showing entropy and information gain (inside plot, offset above and below)
+    pos = range(len(hyls))
+    for tick, hyl in enumerate(hyls):
+        y_pos = pos[tick]
+        # Position entropy labels inside the plot area, stacked vertically offset from center
+        p.text(p.get_xlim()[0] + 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos - 0.35,
+               f'$H_{{prior}}={round(float(pri_entropy[hyl]), 2)}$',
+               horizontalalignment='left', size='medium', color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        p.text(p.get_xlim()[0] + 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos + 0.35,
+               f'$H_{{posterior}}={round(float(pst_entropy[hyl]), 2)}$',
+               horizontalalignment='left', size='medium', color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        p.text(p.get_xlim()[1] - 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos,
+               f'$IG={round(float(hyl_ig[hyl]), 2)}$',
+               horizontalalignment='right', verticalalignment='center', size='medium', color='darkgreen', weight='bold', 
+               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+    
+    p.legend().remove()
+    p.tick_params(axis='y', which='major', labelsize=12, labelfontfamily='Times New Roman')
+    p.set_xlabel('Parameter Value', fontsize='medium')
+    p.set_ylabel('Hyper-latent Variable', fontsize='medium')
+    p.set_title('Prior vs Posterior Distributions with Information Gain', fontsize='medium', fontweight='bold')
+    
+    plt.tight_layout()
+    filename_entropy = 'prior_posterior_entropy_violin.png'
+    plt.savefig(filename_entropy, dpi=150, bbox_inches='tight')
+    print(f"\nEntropy violin plot saved as '{filename_entropy}'")
     plt.show()
 
 
