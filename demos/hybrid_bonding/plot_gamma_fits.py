@@ -12,7 +12,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
 # Import data from dielectric module
-from demos.hybrid_bonding.dielectric import hybrid_bonding_dielectric
+from demos.hybrid_bonding.datagen_dielectric import hybrid_bonding_dielectric
 
 def plot_gamma_fits():
     """

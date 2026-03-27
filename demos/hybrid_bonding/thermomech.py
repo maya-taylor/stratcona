@@ -81,7 +81,8 @@ def hybrid_bonding_thermomech():
     # - c_0, c_1, c_2 : empirical found material coefficients
     # - t_0: dwell time at high temperature (seconds)
     # - t_D: reference time constant (seconds)
-    # - delta_D: inelastic (plastic) strange range for cycles (dimensionless ratio delta_L/L)
+    # - T_sj: solder joint temperature (Celsius)
+    # - delta_D: inelastic (plastic) strain range for cycles (dimensionless ratio delta_L/L)
 
     #################################################################
     # Define Prior Parameters
@@ -438,9 +439,9 @@ def hybrid_bonding_thermomech():
     )
     
     # ---- Data Points (all conditions) ----
-    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="red", s=100, marker="o", label="Data Cond1 (T=50,t=600)", zorder=5)
-    plt.scatter(Nf_data_cond2, 100*delta_D_data_cond2, color="orange", s=100, marker="s", label="Data Cond2 (T=60,t=500)", zorder=5)
-    plt.scatter(Nf_data_cond3, 100*delta_D_data_cond3, color="brown", s=100, marker="^", label="Data Cond3 (T=40,t=300)", zorder=5)
+    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="red", s=100, marker="o", label="Data Points (T=50,t=600)", zorder=5)
+    # plt.scatter(Nf_data_cond2, 100*delta_D_data_cond2, color="orange", s=100, marker="s", label="Data Cond2 (T=60,t=500)", zorder=5)
+    # plt.scatter(Nf_data_cond3, 100*delta_D_data_cond3, color="brown", s=100, marker="^", label="Data Cond3 (T=40,t=300)", zorder=5)
     
     plt.xscale("log")
     plt.yscale("log")
@@ -591,7 +592,7 @@ def hybrid_bonding_thermomech():
         ax.set_xlabel(hyl_name)
         ax.set_ylabel('Density')
         if USE_SCALED_PRIORS and hyl_name in ['c_1_nom', 'c_2_nom']:
-            ax.set_xlabel(f"{hyl_name} (SCALED)")
+            ax.set_xlabel(f"{hyl_name}")
         ax.set_title(f'{hyl_name}: Prior vs Posterior')
         ax.legend()
         ax.grid(True, alpha=0.3)
@@ -600,7 +601,7 @@ def hybrid_bonding_thermomech():
     for idx in range(n_vars, len(axes)):
         fig.delaxes(axes[idx])
     
-    fig.suptitle("Model", fontsize=14, fontweight='bold', y=0.995)
+    fig.suptitle("Prior vs Posterior Distributions", fontsize=14, fontweight='bold', y=0.995)
     
     plt.tight_layout()
     filename = 'posterior_distributions.png'
