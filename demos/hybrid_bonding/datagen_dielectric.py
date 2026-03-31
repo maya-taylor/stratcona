@@ -30,10 +30,9 @@ import stratcona
 # This script is for generating data for modelling the reliability of hybrid bonding interconnects from dielectric degradation
 # This specifically models SiCN reliability but this could be adapted to other dielectrics
 # I am using this paper for reference: https://ieeexplore.ieee.org/abstract/document/9764478
-# Paper uses the E model which states that 
-# t_50 is proportional to exp(gamma * E) where E is the electric field across the dielectric and gamma the field acceleration factor
-# This paper uses voltage ramp tests to determine gamma, the field acceleration factor
-# Then you can use the power law to further project lifetime
+# This script fits the voltage ramp data with a power law relation between ramp rate and breakdown voltage.
+# In original space, ramp_rate = prefactor * vbd^gamma.
+# In log-space, ln(ramp_rate) = gamma * ln(vbd) + ln(prefactor).
 
 # Keeping this model extremely simple so it can just be an extra mechanism
 
@@ -44,15 +43,15 @@ def hybrid_bonding_dielectric():
     # Defining Equation
     ########################################################
 
-    # This function is to help find the fit 
+    # This function solves for gamma from the power law fit.
     # Parameters:
     # - ramp_rate: the rate at which voltage is ramped in the test (V/s)
     # - vbd: the breakdown voltage observed in the test (V)
-    # - const: constant to fit the slope  (just a fitting parameter)
-    def calc_gamma_fit(ramp_rate, vbd, gamma, const):
-       # ln(ramp_rate) = (gamma - 1) * ln(vbd) + const
-       gamma = 1 + (jnp.log(ramp_rate) - const) / jnp.log(vbd)
-       return gamma
+    # - log_prefactor: ln(prefactor) in the power law fit
+    def calc_gamma_fit(ramp_rate, vbd, log_prefactor):
+        # ln(ramp_rate) = gamma * ln(vbd) + ln(prefactor)
+        gamma = (jnp.log(ramp_rate) - log_prefactor) / jnp.log(vbd)
+        return gamma
     
     
     ##################################################
@@ -63,7 +62,7 @@ def hybrid_bonding_dielectric():
     # The  data is read off graphs from figure 5 of this paper which was challening to est
     
     # Data points extracted from paper Fig 5
-    # Equation: ln(ramp_rate) = (gamma - 1) * ln(vbd) + const
+    # Equation: ln(ramp_rate) = gamma * ln(vbd) + ln(prefactor)
     # Only including clearly visible points from each graph
     
     # From 100C, gamma = 11.5 - graph (a)
@@ -84,8 +83,8 @@ def hybrid_bonding_dielectric():
     def calculate_gamma_from_data(data_points, temp_label):
         """
         Calculate gamma (field acceleration factor) from voltage ramp test data
-        Using the calc_gamma_fit function: gamma = 1 + (ln(ramp_rate) - const) / ln(vbd)
-        First finds the constant from linear regression, then uses calc_gamma_fit on each point
+        Using the calc_gamma_fit function: gamma = (ln(ramp_rate) - ln(prefactor)) / ln(vbd)
+        First finds ln(prefactor) from linear regression, then uses calc_gamma_fit on each point
         
         Parameters:
         - data_points: list of [vbd_voltage, ramp_rate] points
@@ -98,24 +97,24 @@ def hybrid_bonding_dielectric():
         ramp_rate = np.array([pt[1] for pt in data_points])
         
         # Linear regression in log-log space: ln(ramp_rate) vs ln(vbd)
-        # to find the constant (intercept)
+        # to find ln(prefactor), the intercept.
         x = np.log(vbd)
         y = np.log(ramp_rate)
         coeffs = np.polyfit(x, y, 1)
         slope = coeffs[0]
-        const = coeffs[1]
+        log_prefactor = coeffs[1]
         
         # Use calc_gamma_fit on each point
         gamma_values = []
         print(f"\n{temp_label}:")
         print(f"  Data points (Vbd, Ramp Rate): {data_points}")
-        print(f"  Fitted constant: {const:.4f}")
+        print(f"  Fitted gamma from regression slope: {slope:.4f}")
+        print(f"  Fitted log-prefactor: {log_prefactor:.4f}")
         
         for pt in data_points:
             vbd_pt = pt[0]
             ramp_pt = pt[1]
-            # Convert to JAX arrays for calc_gamma_fit
-            gamma_calc = 1 + (np.log(ramp_pt) - const) / np.log(vbd_pt)
+            gamma_calc = float(calc_gamma_fit(ramp_pt, vbd_pt, log_prefactor))
             gamma_values.append(gamma_calc)
             print(f"    Point ({vbd_pt}, {ramp_pt}): gamma = {gamma_calc:.2f}")
         
@@ -123,7 +122,7 @@ def hybrid_bonding_dielectric():
         gamma_avg = np.mean(gamma_values)
         
         # Calculate R-squared for fit quality
-        y_pred = slope * x + const
+        y_pred = slope * x + log_prefactor
         ss_res = np.sum((y - y_pred) ** 2)
         ss_tot = np.sum((y - np.mean(y)) ** 2)
         r_squared = 1 - (ss_res / ss_tot)
@@ -201,7 +200,7 @@ def hybrid_bonding_dielectric():
             # Plot data points
             ax.scatter(vbd, ramp_rate, color='red', s=100, zorder=5, marker='o')
             
-            # Fit line: ln(ramp_rate) = (gamma - 1) * ln(vbd) + const
+            # Fit line: ln(ramp_rate) = gamma * ln(vbd) + ln(prefactor)
             x = np.log(vbd)
             y = np.log(ramp_rate)
             coeffs = np.polyfit(x, y, 1)

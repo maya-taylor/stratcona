@@ -29,10 +29,9 @@ import stratcona
 # This script is for modelling the reliability of hybrid bonding interconnects from dielectric degradation
 # This specifically models SiCN reliability but this could be adapted to other dielectrics
 # I am using this paper for reference: https://ieeexplore.ieee.org/abstract/document/9764478
-# Paper uses the E model which states that 
-# t_50 is proportional to exp(gamma * E) where E is the electric field across the dielectric and gamma the field acceleration factor
-# This paper uses voltage ramp tests to determine gamma, the field acceleration factor
-# Then you can use the power law to further project lifetime
+# This demo fits the voltage ramp data with a power law relation between ramp rate and breakdown voltage.
+# In original space, ramp_rate = prefactor * vbd^gamma.
+# Working in log-space keeps the inference numerically stable while still fitting the power law.
 
 # Keeping this model extremely simple so it can just be an extra mechanism
 # I want someway to be able to project cycles to failure but paper I have said they look mostly at gamma
@@ -46,26 +45,35 @@ def hybrid_bonding_dielectric():
     # Defining Equation
     ########################################################
 
-    # This function calculates log(ramp_rate) from gamma and const
-    # Using: ln(ramp_rate) = (gamma - 1) * ln(vbd) + const
-    def calc_log_ramprate(vbd, gamma, const):
-        log_ramprate = (gamma - 1.0) * jnp.log(vbd) + const
+    # Power law: ramp_rate = prefactor * vbd^gamma
+    def calc_log_ramprate(vbd, gamma, log_prefactor):
+        log_ramprate = gamma * jnp.log(vbd) + log_prefactor
         return log_ramprate
 
-    gamma_prior = {'loc' : 11.5, 'scale' : 2}  # Paper reports gamma = 11.5 at 100C
-    const_prior = {'loc' : -60, 'scale' : 20} # fitting constant
+    def fit_gamma_from_ramp_data(vbd, ramp_rate):
+        log_vbd = np.log(np.asarray(vbd, dtype=float))
+        log_ramp_rate = np.log(np.asarray(ramp_rate, dtype=float))
+        gamma_fit, log_prefactor_fit = np.polyfit(log_vbd, log_ramp_rate, 1)
+        predicted = gamma_fit * log_vbd + log_prefactor_fit
+        ss_res = np.sum((log_ramp_rate - predicted) ** 2)
+        ss_tot = np.sum((log_ramp_rate - np.mean(log_ramp_rate)) ** 2)
+        r_squared = 1.0 if np.isclose(ss_tot, 0.0) else 1 - (ss_res / ss_tot)
+        return gamma_fit, log_prefactor_fit, r_squared
+
+    gamma_prior = {'loc' : 10.5, 'scale' : 2}  # Approximate slope in log-log space at 100C
+    log_prefactor_prior = {'loc' : -60, 'scale' : 20} # ln(prefactor) for the power law fit
 
     mb = stratcona.SPMBuilder(mdl_name='hb_dielectric')
     mb.add_params(meas_var = 0.2) # measurement variance for log(ramp_rate)
     
     mb.add_hyperlatent('gamma_nom', dists.Normal, gamma_prior)
-    mb.add_hyperlatent('const_nom', dists.Normal, const_prior)
+    mb.add_hyperlatent('log_prefactor_nom', dists.Normal, log_prefactor_prior)
 
     mb.add_latent('gamma', nom='gamma_nom')
-    mb.add_latent('const', nom='const_nom')
+    mb.add_latent('log_prefactor', nom='log_prefactor_nom')
 
-    print(f"  gamma:     loc={gamma_prior['loc']}, scale={gamma_prior['scale']}")
-    print(f"  const:     loc={const_prior['loc']}, scale={const_prior['scale']}")
+    print(f"  gamma:           loc={gamma_prior['loc']}, scale={gamma_prior['scale']}")
+    print(f"  log_prefactor:   loc={log_prefactor_prior['loc']}, scale={log_prefactor_prior['scale']}")
     print()
 
     mb.add_intermediate('log_ramprate_predicted', calc_log_ramprate)
@@ -105,45 +113,38 @@ def hybrid_bonding_dielectric():
     vbd_200C = jnp.array([pt[0] for pt in vbd_ramp_rate_200C])
     ramprate_200C = jnp.array([pt[1] for pt in vbd_ramp_rate_200C])
 
+    datasets_by_temp = {
+        100: (vbd_100C, ramprate_100C),
+        150: (vbd_150C, ramprate_150C),
+        175: (vbd_175C, ramprate_175C),
+        200: (vbd_200C, ramprate_200C),
+    }
+    if SET_TEMP not in datasets_by_temp:
+        raise ValueError(f'Unsupported SET_TEMP {SET_TEMP}. Expected one of {sorted(datasets_by_temp)}.')
+
+    selected_vbd, selected_ramprate = datasets_by_temp[SET_TEMP]
+    gamma_fit, log_prefactor_fit, fit_r_squared = fit_gamma_from_ramp_data(selected_vbd, selected_ramprate)
+    print(f"Direct fit at {SET_TEMP}C from ramp_rate vs vbd:")
+    print(f"  gamma_fit:         {gamma_fit:.4f}")
+    print(f"  log_prefactor_fit: {log_prefactor_fit:.4f}")
+    print(f"  R^2:               {fit_r_squared:.4f}")
+    print()
+
     #################################################################
     # Define how the data was collected
     #################################################################
 
-    # Create a separate test condition for each ramp_rate value
-    # Observe log(ramp_rate), which depends on both gamma and const
+    # Create a separate test condition for each ramp_rate value.
+    # Observe log(ramp_rate) so the model fits the selected ramp-rate and Vbd data directly.
     test_conds = {}
     cond_params = {}
     measured_data = {}
-    
-    if SET_TEMP == 100:
-        for i, (ramp_val, vbd_val) in enumerate(zip(ramprate_100C, vbd_100C)):
-            test_name = f'temp_100C_test_{i}'
-            test_conds[test_name] = {'lot': 1, 'chp': 1}
-            cond_params[test_name] = {'vbd': float(vbd_val)}
-            # Observe log(ramp_rate) - the model will fit gamma and const to match this
-            log_ramprate_obs = float(jnp.log(ramp_val))
-            measured_data[test_name] = {'log_ramprate_observed': jnp.array([[[log_ramprate_obs]]])}
-    elif SET_TEMP == 150:
-        for i, (ramp_val, vbd_val) in enumerate(zip(ramprate_150C, vbd_150C)):
-            test_name = f'temp_150C_test_{i}'
-            test_conds[test_name] = {'lot': 1, 'chp': 1}
-            cond_params[test_name] = {'vbd': float(vbd_val)}
-            log_ramprate_obs = float(jnp.log(ramp_val))
-            measured_data[test_name] = {'log_ramprate_observed': jnp.array([[[log_ramprate_obs]]])}
-    elif SET_TEMP == 175:
-        for i, (ramp_val, vbd_val) in enumerate(zip(ramprate_175C, vbd_175C)):
-            test_name = f'temp_175C_test_{i}'
-            test_conds[test_name] = {'lot': 1, 'chp': 1}
-            cond_params[test_name] = {'vbd': float(vbd_val)}
-            log_ramprate_obs = float(jnp.log(ramp_val))
-            measured_data[test_name] = {'log_ramprate_observed': jnp.array([[[log_ramprate_obs]]])}
-    elif SET_TEMP == 200:
-        for i, (ramp_val, vbd_val) in enumerate(zip(ramprate_200C, vbd_200C)):
-            test_name = f'temp_200C_test_{i}'
-            test_conds[test_name] = {'lot': 1, 'chp': 1}
-            cond_params[test_name] = {'vbd': float(vbd_val)}
-            log_ramprate_obs = float(jnp.log(ramp_val))
-            measured_data[test_name] = {'log_ramprate_observed': jnp.array([[[log_ramprate_obs]]])}
+    for i, (ramp_val, vbd_val) in enumerate(zip(selected_ramprate, selected_vbd)):
+        test_name = f'temp_{SET_TEMP}C_test_{i}'
+        test_conds[test_name] = {'lot': 1, 'chp': 1}
+        cond_params[test_name] = {'vbd': float(vbd_val)}
+        log_ramprate_obs = float(jnp.log(ramp_val))
+        measured_data[test_name] = {'log_ramprate_observed': jnp.array([[[log_ramprate_obs]]])}
     
     accel_test = stratcona.TestDef('accel_test', test_conds, cond_params)
     am.set_test_definition(accel_test)
@@ -158,7 +159,7 @@ def hybrid_bonding_dielectric():
 
     k1, k2 = rand.split(rand.key(9273036857), 2)
     hyl_samples_prior = am.relmdl.sample(k1, accel_test.dims, accel_test.conds, (ENTROPY_SAMPLES,))
-    hyls = ['gamma_nom', 'const_nom']
+    hyls = ['gamma_nom', 'log_prefactor_nom']
     pri_samples, pri_entropy = {}, {}
     for hyl in hyls:
         pri_samples[hyl] = hyl_samples_prior[hyl]
@@ -200,7 +201,7 @@ def hybrid_bonding_dielectric():
     
     prior_specs = {
         'gamma_nom': gamma_prior,
-        'const_nom': const_prior
+        'log_prefactor_nom': log_prefactor_prior
     }
     
     n_vars = len(pst_samples)
@@ -248,7 +249,7 @@ def hybrid_bonding_dielectric():
     fig, p = plt.subplots(1, 1, figsize=(10, 6))
     display_map = {
         'gamma_nom': '$\\mu_{\\gamma}$',
-        'const_nom': '$\\mu_{const}$'
+        'log_prefactor_nom': '$\\mu_{\\ln c}$'
     }
     
     # Create DataFrame combining prior and posterior samples
