@@ -366,7 +366,7 @@ def hybrid_bonding_thermomech():
     plt.plot(
         mean_pred_hb,
         100*delta_D_range,
-        color="purple",
+        color="#D36CD3",  # purple
         linewidth=3,
         label="Posterior Mean"
     )
@@ -375,7 +375,7 @@ def hybrid_bonding_thermomech():
     plt.plot(
         mean_hb,
         100*delta_D_range,
-        color="purple",
+        color="#D36CD3",  # purple
         linewidth=1.5,
         linestyle=":",
         label="Posterior 95% CI",
@@ -386,12 +386,12 @@ def hybrid_bonding_thermomech():
         100*delta_D_range,
         low_hb,
         high_hb,
-        color="purple",
+        color="#D36CD3",  # purple
         alpha=0.2
     )
     
-    plt.plot(low_hb, 100*delta_D_range, color="purple", linestyle="--", linewidth=1, alpha=0.6)
-    plt.plot(high_hb, 100*delta_D_range, color="purple", linestyle="--", linewidth=1, alpha=0.6)
+    plt.plot(low_hb, 100*delta_D_range, color="#D36CD3", linestyle="--", linewidth=1, alpha=0.6)
+    plt.plot(high_hb, 100*delta_D_range, color="#D36CD3", linestyle="--", linewidth=1, alpha=0.6)
     
     # ---- SnPb Mean (reference) ----
     # these are the values that my posterior should find
@@ -411,9 +411,9 @@ def hybrid_bonding_thermomech():
     plt.plot(
         Nf_snpb_mean,
         100*delta_D_range,
-        color="blue",
+        color="#5194F1",  # blue
         linewidth=2.5,
-        label="SnPb Mean"
+        label="Test Data Mean"
     )
     
     # ---- SAC105 Mean (reference) ----
@@ -433,13 +433,13 @@ def hybrid_bonding_thermomech():
     plt.plot(
         Nf_sac105_mean,
         100*delta_D_range,
-        color="green",
+        color="#66805f",
         linewidth=2.5,
-        label="SAC105 Mean"
+        label="Prior Mean"
     )
     
     # ---- Data Points (all conditions) ----
-    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="red", s=100, marker="o", label="Data Points (T=50,t=600)", zorder=5)
+    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="#AD9610", s=100, marker="o", label="Data Points (T=50,t=600)", zorder=5)
     # plt.scatter(Nf_data_cond2, 100*delta_D_data_cond2, color="orange", s=100, marker="s", label="Data Cond2 (T=60,t=500)", zorder=5)
     # plt.scatter(Nf_data_cond3, 100*delta_D_data_cond3, color="brown", s=100, marker="^", label="Data Cond3 (T=40,t=300)", zorder=5)
     
@@ -449,7 +449,7 @@ def hybrid_bonding_thermomech():
     
     plt.xlabel("Mean Cycles to Failure (Nf, 50%)", fontsize=12)
     plt.ylabel("Inelastic Strain Range (ΔD, %)", fontsize=12)
-    plt.title("Posterior vs SAC105 and SnPb (Posterior should be SnPb)", fontsize=14, fontweight='bold')
+    plt.title("Posterior Mean and CI vs. Prior and Test Data Means", fontsize=14, fontweight='bold')
     plt.legend(fontsize=11)
     plt.grid(True, which="both", alpha=0.3)
     plt.tight_layout()
@@ -641,7 +641,7 @@ def hybrid_bonding_thermomech():
     # Create violin plot
     sb.violinplot(
         df_violin, x='val', y='hyl', ax=p, split=True, density_norm='count',
-        hue='pri-pst', inner='quart', palette=['skyblue', 'darkblue'], linewidth=1.25
+        hue='pri-pst', inner='quart', palette=['#eba5d7', '#83a2cb'], linewidth=1.25
     )
     for fill in p.collections:
         fill.set_alpha(0.75)
@@ -664,7 +664,7 @@ def hybrid_bonding_thermomech():
                horizontalalignment='left', size='medium', color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
         p.text(p.get_xlim()[1] - 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos,
                f'$IG={round(float(hyl_ig[hyl]), 2)}$',
-               horizontalalignment='right', verticalalignment='center', size='medium', color='darkgreen', weight='bold', 
+               horizontalalignment='right', verticalalignment='center', size='medium', color='black', weight='bold', 
                bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
     
     p.legend().remove()

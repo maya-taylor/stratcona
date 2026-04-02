@@ -30,7 +30,7 @@ import stratcona
 # This specifically models SiCN reliability but this could be adapted to other dielectrics
 # I am using this paper for reference: https://ieeexplore.ieee.org/abstract/document/9764478
 # This demo fits the voltage ramp data with a power law relation between ramp rate and breakdown voltage.
-# In original space, ramp_rate = prefactor * vbd^gamma.
+# In original space, ramp_rate = c * vbd^gamma.
 # Working in log-space keeps the inference numerically stable while still fitting the power law.
 
 # Keeping this model extremely simple so it can just be an extra mechanism
@@ -45,46 +45,10 @@ def hybrid_bonding_dielectric():
     # Defining Equation
     ########################################################
 
-    # Power law: ramp_rate = prefactor * vbd^gamma
-    def calc_log_ramprate(vbd, gamma, log_prefactor):
-        log_ramprate = gamma * jnp.log(vbd) + log_prefactor
+    # Power law: ramp_rate = c * vbd^gamma
+    def calc_log_ramprate(vbd, gamma, log_c):
+        log_ramprate = gamma * jnp.log(vbd) + log_c
         return log_ramprate
-
-    def fit_gamma_from_ramp_data(vbd, ramp_rate):
-        log_vbd = np.log(np.asarray(vbd, dtype=float))
-        log_ramp_rate = np.log(np.asarray(ramp_rate, dtype=float))
-        gamma_fit, log_prefactor_fit = np.polyfit(log_vbd, log_ramp_rate, 1)
-        predicted = gamma_fit * log_vbd + log_prefactor_fit
-        ss_res = np.sum((log_ramp_rate - predicted) ** 2)
-        ss_tot = np.sum((log_ramp_rate - np.mean(log_ramp_rate)) ** 2)
-        r_squared = 1.0 if np.isclose(ss_tot, 0.0) else 1 - (ss_res / ss_tot)
-        return gamma_fit, log_prefactor_fit, r_squared
-
-    gamma_prior = {'loc' : 10.5, 'scale' : 2}  # Approximate slope in log-log space at 100C
-    log_prefactor_prior = {'loc' : -60, 'scale' : 20} # ln(prefactor) for the power law fit
-
-    mb = stratcona.SPMBuilder(mdl_name='hb_dielectric')
-    mb.add_params(meas_var = 0.2) # measurement variance for log(ramp_rate)
-    
-    mb.add_hyperlatent('gamma_nom', dists.Normal, gamma_prior)
-    mb.add_hyperlatent('log_prefactor_nom', dists.Normal, log_prefactor_prior)
-
-    mb.add_latent('gamma', nom='gamma_nom')
-    mb.add_latent('log_prefactor', nom='log_prefactor_nom')
-
-    print(f"  gamma:           loc={gamma_prior['loc']}, scale={gamma_prior['scale']}")
-    print(f"  log_prefactor:   loc={log_prefactor_prior['loc']}, scale={log_prefactor_prior['scale']}")
-    print()
-
-    mb.add_intermediate('log_ramprate_predicted', calc_log_ramprate)
-
-    mb.add_observed(
-        'log_ramprate_observed',
-        dists.Normal,
-        {'loc': 'log_ramprate_predicted', 'scale': 'meas_var'},
-        1)
-    
-    am = stratcona.AnalysisManager(mb.build_model(), rng_seed=424242)
 
     ##################################################################
     # Defining Test Collection and Data
@@ -123,12 +87,27 @@ def hybrid_bonding_dielectric():
         raise ValueError(f'Unsupported SET_TEMP {SET_TEMP}. Expected one of {sorted(datasets_by_temp)}.')
 
     selected_vbd, selected_ramprate = datasets_by_temp[SET_TEMP]
-    gamma_fit, log_prefactor_fit, fit_r_squared = fit_gamma_from_ramp_data(selected_vbd, selected_ramprate)
-    print(f"Direct fit at {SET_TEMP}C from ramp_rate vs vbd:")
-    print(f"  gamma_fit:         {gamma_fit:.4f}")
-    print(f"  log_prefactor_fit: {log_prefactor_fit:.4f}")
-    print(f"  R^2:               {fit_r_squared:.4f}")
-    print()
+
+    gamma_prior = {'loc': 10.5, 'scale': 2.0}
+    log_c_prior = {'loc': -60.0, 'scale': 20.0}
+
+    mb = stratcona.SPMBuilder(mdl_name='hb_dielectric')
+    mb.add_params(meas_var=0.2) # measurement variance for log(ramp_rate)
+
+    mb.add_hyperlatent('gamma_nom', dists.Normal, gamma_prior)
+    mb.add_hyperlatent('log_c_nom', dists.Normal, log_c_prior)
+
+    mb.add_latent('gamma', nom='gamma_nom')
+    mb.add_latent('log_c', nom='log_c_nom')
+
+    mb.add_intermediate('log_ramprate_predicted', calc_log_ramprate)
+    mb.add_observed(
+        'log_ramprate_observed',
+        dists.Normal,
+        {'loc': 'log_ramprate_predicted', 'scale': 'meas_var'},
+        1)
+
+    am = stratcona.AnalysisManager(mb.build_model(), rng_seed=424242)
 
     #################################################################
     # Define how the data was collected
@@ -159,7 +138,7 @@ def hybrid_bonding_dielectric():
 
     k1, k2 = rand.split(rand.key(9273036857), 2)
     hyl_samples_prior = am.relmdl.sample(k1, accel_test.dims, accel_test.conds, (ENTROPY_SAMPLES,))
-    hyls = ['gamma_nom', 'log_prefactor_nom']
+    hyls = ['gamma_nom', 'log_c_nom']
     pri_samples, pri_entropy = {}, {}
     for hyl in hyls:
         pri_samples[hyl] = hyl_samples_prior[hyl]
@@ -199,9 +178,13 @@ def hybrid_bonding_dielectric():
     # -------- PLOT POSTERIOR DISTRIBUTIONS WITH PRIORS ---------------
     #################################################################
     
+    display_map = {
+        'gamma_nom': '$\\gamma$',
+        'log_c_nom': '$\\ln c$'
+    }
     prior_specs = {
         'gamma_nom': gamma_prior,
-        'log_prefactor_nom': log_prefactor_prior
+        'log_c_nom': log_c_prior
     }
     
     n_vars = len(pst_samples)
@@ -221,9 +204,9 @@ def hybrid_bonding_dielectric():
             prior_pdf = jnp.exp(prior_dist.log_prob(x_range))
             ax.plot(x_range, prior_pdf, 'r-', linewidth=2, label='Prior')
         
-        ax.set_xlabel(hyl_name)
+        ax.set_xlabel(display_map.get(hyl_name, hyl_name))
         ax.set_ylabel('Density')
-        ax.set_title(f'{hyl_name}: Prior vs Posterior')
+        ax.set_title(f'{display_map.get(hyl_name, hyl_name)}: Prior vs Posterior')
         ax.legend()
         ax.grid(True, alpha=0.3)
     
@@ -247,21 +230,21 @@ def hybrid_bonding_dielectric():
     sb.set_theme(style='ticks', font='Times New Roman')
     
     fig, p = plt.subplots(1, 1, figsize=(10, 6))
-    display_map = {
+    violin_display_map = {
         'gamma_nom': '$\\mu_{\\gamma}$',
-        'log_prefactor_nom': '$\\mu_{\\ln c}$'
+        'log_c_nom': '$\\mu_{\\ln c}$'
     }
     
     # Create DataFrame combining prior and posterior samples
     df_list = []
     for hyl in hyls:
         hyl_df = pd.DataFrame(pri_samples[hyl], columns=['val'])
-        hyl_df['hyl'] = display_map[hyl]
+        hyl_df['hyl'] = violin_display_map[hyl]
         hyl_df['pri-pst'] = 'Prior'
         df_list.append(hyl_df)
     for hyl in hyls:
         hyl_df = pd.DataFrame(pst_samples[hyl], columns=['val'])
-        hyl_df['hyl'] = display_map[hyl]
+        hyl_df['hyl'] = violin_display_map[hyl]
         hyl_df['pri-pst'] = 'Posterior'
         df_list.append(hyl_df)
     df_violin = pd.concat(df_list, ignore_index=True)

@@ -289,15 +289,15 @@ def hybrid_bonding_electromigration():
 
     # Plot prior curves
     for i in range(num_curves):
-        ax.plot(temp_range_celsius, pri_mttf[i, :], color='red', alpha=0.08, linewidth=1.0)
+        ax.plot(temp_range_celsius, pri_mttf[i, :], color='#69cd50', alpha=0.1, linewidth=1.0)
 
     # Plot posterior curves
     for i in range(num_curves):
-        ax.plot(temp_range_celsius, pst_mttf[i, :], color='darkblue', alpha=0.05, linewidth=1.0)
+        ax.plot(temp_range_celsius, pst_mttf[i, :], color="#3473c6", alpha=0.1, linewidth=1.0)
 
     # Add legend patches
-    prior_patch = pltlines.Line2D([0], [0], color='red', linewidth=2, label='Prior predictive MTTF')
-    posterior_patch = pltlines.Line2D([0], [0], color='darkblue', linewidth=2, label='Posterior predictive MTTF')
+    prior_patch = pltlines.Line2D([0], [0], color='#69cd50', linewidth=2, label='Prior predictive MTTF')
+    posterior_patch = pltlines.Line2D([0], [0], color='#3473c6', linewidth=2, label='Posterior predictive MTTF')
     ax.legend(handles=[prior_patch, posterior_patch], loc='upper right', fontsize='medium')
 
     ax.set_xlabel('Temperature (°C)', fontsize='medium')
