@@ -36,7 +36,7 @@ import stratcona
 # Keeping this model extremely simple so it can just be an extra mechanism
 # I want someway to be able to project cycles to failure but paper I have said they look mostly at gamma
 
-SET_TEMP = 100 # set this to the temperature you want to look at (100, 150, 175, 200)
+SET_TEMP = 150 # set this to the temperature you want to look at (100, 150, 175, 200)
 
 def hybrid_bonding_dielectric():
 
@@ -88,8 +88,8 @@ def hybrid_bonding_dielectric():
 
     selected_vbd, selected_ramprate = datasets_by_temp[SET_TEMP]
 
-    gamma_prior = {'loc': 10.5, 'scale': 2.0}
-    log_c_prior = {'loc': -60.0, 'scale': 20.0}
+    gamma_prior = {'loc': 12.3, 'scale': 2.0} # variance of 2.0 since that is roughly how much gamma varies in their datasets
+    log_c_prior = {'loc': -65, 'scale': 10.0}
 
     mb = stratcona.SPMBuilder(mdl_name='hb_dielectric')
     mb.add_params(meas_var=0.2) # measurement variance for log(ramp_rate)
@@ -195,14 +195,14 @@ def hybrid_bonding_dielectric():
         ax = axes[idx]
         
         # Plot posterior histogram
-        ax.hist(samples, bins=50, density=True, alpha=0.6, label='Posterior', color='blue', edgecolor='black')
+        ax.hist(samples, bins=50, density=True, alpha=0.6, label='Posterior', color='#5194F1', edgecolor='black')
         
         # Plot prior curve
         x_range = jnp.linspace(float(jnp.min(samples)), float(jnp.max(samples)), 200)
         if hyl_name in prior_specs:
             prior_dist = dists.Normal(**prior_specs[hyl_name])
             prior_pdf = jnp.exp(prior_dist.log_prob(x_range))
-            ax.plot(x_range, prior_pdf, 'r-', linewidth=2, label='Prior')
+            ax.plot(x_range, prior_pdf, '#D36CD3', linewidth=2, label='Prior')
         
         ax.set_xlabel(display_map.get(hyl_name, hyl_name))
         ax.set_ylabel('Density')

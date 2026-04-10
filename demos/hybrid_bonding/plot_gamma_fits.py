@@ -57,12 +57,12 @@ def plot_gamma_fits():
         prefactor_fit, gamma_fit = popt
 
         # Plot data points
-        ax.scatter(vbd, ramprate, color='red', s=100, zorder=5, marker='o', label='Data')
+        ax.scatter(vbd, ramprate, color='#D36CD3', s=100, zorder=5, marker='o', label='Data')
 
         # Plot power-law fit curve over a wider voltage range
         vbd_range = np.linspace(min(vbd) * 0.85, max(vbd) * 1.10, 300)
         ramp_fit  = power_law(vbd_range, prefactor_fit, gamma_fit)
-        ax.plot(vbd_range, ramp_fit, 'r-', linewidth=2.5, zorder=3,
+        ax.plot(vbd_range, ramp_fit, '#D36CD3', linewidth=2.5, zorder=3,
                 label=f'Power law fit  $\\gamma={gamma_fit:.2f}$')
 
         ax.set_yscale('log')

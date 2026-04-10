@@ -59,7 +59,7 @@ def hybrid_bonding_electromigration():
     # Define the model
     mb = stratcona.SPMBuilder(mdl_name='hb_electromigration')
 
-    # Add fixed stochastic parameters (hyperlatents only, no hierarchical latent variation)
+    # Add fixed stochastic parameters
     mb.add_hyperlatent('ea', dists.Normal, ea_prior)
     mb.add_hyperlatent('n', dists.Normal, n_prior)
     mb.add_hyperlatent('A', dists.Normal, A_prior)

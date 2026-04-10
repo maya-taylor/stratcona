@@ -198,7 +198,7 @@ def hybrid_bonding_dielectric():
             subplot_label = datasets[idx]['label']
             
             # Plot data points
-            ax.scatter(vbd, ramp_rate, color='red', s=100, zorder=5, marker='o')
+            ax.scatter(vbd, ramp_rate, color='#D36CD3', s=100, zorder=5, marker='o')
             
             # Fit line: ln(ramp_rate) = gamma * ln(vbd) + ln(prefactor)
             x = np.log(vbd)
@@ -212,7 +212,7 @@ def hybrid_bonding_dielectric():
             ramp_fit = np.exp(y_fit)
             
             # Plot fitted line
-            ax.plot(vbd_range, ramp_fit, 'r-', linewidth=2.5, zorder=3)
+            ax.plot(vbd_range, ramp_fit, '#D36CD3', linewidth=2.5, zorder=3)
             
             # Set scale and limits
             ax.set_yscale('log')
