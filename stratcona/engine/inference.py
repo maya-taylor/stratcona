@@ -232,7 +232,8 @@ def marginalize_v_naive(rng_key, spm, batch_dims: tuple[int, int, int], test_dim
     return lp_y_g_x, perf_stats
 
 
-def inference_model(model, hyl_info, observed_data, rng_key, num_samples: int = 10_000, num_chains: int = 4):
+def inference_model(model, hyl_info, observed_data, rng_key, num_samples: int = 10_000, num_chains: int = 4,
+                    return_details: bool = False):
     kernel = NUTS(model)
     sampler = MCMC(kernel, num_warmup=2_000, num_samples=num_samples, num_chains=num_chains, progress_bar=True)
     sampler.run(rng_key, measured=observed_data, extra_fields=('potential_energy',))
@@ -251,6 +252,16 @@ def inference_model(model, hyl_info, observed_data, rng_key, num_samples: int = 
     new_prior = {}
     for hyl in hyl_info:
         new_prior[hyl] = fit_dist_to_samples(hyl_info[hyl], samples[hyl])
+
+    if return_details:
+        return {
+            'new_prior': new_prior,
+            'samples': samples,
+            'convergence_stats': convergence_stats,
+            'extra_fields': extra_info,
+            'diverging': diverging,
+        }
+
     return new_prior
 
 

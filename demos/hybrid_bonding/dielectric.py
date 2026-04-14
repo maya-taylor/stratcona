@@ -47,7 +47,7 @@ def hybrid_bonding_dielectric():
 
     # Power law: ramp_rate = c * vbd^gamma
     def calc_log_ramprate(vbd, gamma, log_c):
-        log_ramprate = gamma * jnp.log(vbd) + log_c
+        log_ramprate = (gamma + 1) * jnp.log(vbd) - log_c
         return log_ramprate
 
     ##################################################################
@@ -89,7 +89,7 @@ def hybrid_bonding_dielectric():
     selected_vbd, selected_ramprate = datasets_by_temp[SET_TEMP]
 
     gamma_prior = {'loc': 12.3, 'scale': 2.0} # variance of 2.0 since that is roughly how much gamma varies in their datasets
-    log_c_prior = {'loc': -65, 'scale': 10.0}
+    log_c_prior = {'loc': 65, 'scale': 10.0}
 
     mb = stratcona.SPMBuilder(mdl_name='hb_dielectric')
     mb.add_params(meas_var=0.2) # measurement variance for log(ramp_rate)
@@ -206,7 +206,7 @@ def hybrid_bonding_dielectric():
         
         ax.set_xlabel(display_map.get(hyl_name, hyl_name))
         ax.set_ylabel('Density')
-        ax.set_title(f'{display_map.get(hyl_name, hyl_name)}: Prior vs Posterior')
+        #ax.set_title(f'{display_map.get(hyl_name, hyl_name)}: Prior vs Posterior')
         ax.legend()
         ax.grid(True, alpha=0.3)
     
@@ -214,7 +214,7 @@ def hybrid_bonding_dielectric():
     for idx in range(n_vars, len(axes)):
         fig.delaxes(axes[idx])
     
-    fig.suptitle("Prior vs Posterior Distributions", fontsize=14, fontweight='bold', y=0.995)
+   # fig.suptitle("Prior vs Posterior Distributions", fontsize=14, fontweight='bold', y=0.995)
     
     plt.tight_layout()
     filename = 'dielectric_posterior_distributions.png'
@@ -281,7 +281,7 @@ def hybrid_bonding_dielectric():
     p.legend().remove()
     p.tick_params(axis='y', which='major', labelsize=12, labelfontfamily='Times New Roman')
     p.set_xlabel('Parameter Value', fontsize='medium')
-    p.set_ylabel('Hyper-latent Variable', fontsize='medium')
+    p.set_ylabel('Latent Variable', fontsize='medium')
     p.set_title('Prior vs Posterior Distributions with Information Gain', fontsize='medium', fontweight='bold')
     
     plt.tight_layout()

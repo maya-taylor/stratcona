@@ -243,9 +243,9 @@ def hybrid_bonding_electromigration():
     #################################################################
     # -------- PLOT COLOR-CODED MTTF PREDICTIONS (PRIOR vs POSTERIOR)
     #################################################################
-    num_curves = 2000
+    num_curves = 1000
     test_plot = stratcona.TestDef('mttf_plot', test_conds, cond_params)
-    rng, k1, k2, k3, k4 = rand.split(rand.key(452424242), 5)
+    rng, k1, k2, k3, k4 = rand.split(rand.key(4525455524242), 5)
 
     # Sample from prior and compute MTTF curves over a range of temperatures
     prm_samples_prior = am.relmdl.sample(k1, test_plot.dims, test_plot.conds, (num_curves,), ('ea', 'n', 'A'))
@@ -284,27 +284,27 @@ def hybrid_bonding_electromigration():
 
     # Plot color-coded MTTF predictions
     sb.set_context('notebook')
-    sb.set_theme(style='ticks', font='Times New Roman')
-    fig, ax = plt.subplots(figsize=(12, 7))
+    sb.set_theme(style='ticks')
+    fig, ax = plt.subplots(figsize=(10, 6))
 
     # Plot prior curves
     for i in range(num_curves):
-        ax.plot(temp_range_celsius, pri_mttf[i, :], color='#69cd50', alpha=0.1, linewidth=1.0)
+        ax.plot(temp_range_celsius, pri_mttf[i, :], color="#ef00cf", alpha=0.15, linewidth=1.0)
 
     # Plot posterior curves
     for i in range(num_curves):
-        ax.plot(temp_range_celsius, pst_mttf[i, :], color="#3473c6", alpha=0.1, linewidth=1.0)
+        ax.plot(temp_range_celsius, pst_mttf[i, :], color="#6099e5", alpha=0.1, linewidth=1.0)
 
     # Add legend patches
-    prior_patch = pltlines.Line2D([0], [0], color='#69cd50', linewidth=2, label='Prior predictive MTTF')
-    posterior_patch = pltlines.Line2D([0], [0], color='#3473c6', linewidth=2, label='Posterior predictive MTTF')
-    ax.legend(handles=[prior_patch, posterior_patch], loc='upper right', fontsize='medium')
+    prior_patch = pltlines.Line2D([0], [0], color="#ef00cf", linewidth=2, label='Prior predictive MTTF')
+    posterior_patch = pltlines.Line2D([0], [0], color="#6099e5", linewidth=2, label='Posterior predictive MTTF')
+    ax.legend(handles=[prior_patch, posterior_patch], loc='upper right', fontsize='14')
 
-    ax.set_xlabel('Temperature (°C)', fontsize='medium')
-    ax.set_ylabel('Mean Time To Failure (hours)', fontsize='medium')
+    ax.set_xlabel('Temperature (°C)', fontsize='18')
+    ax.set_ylabel('Mean Time To Failure (hours)', fontsize='18')
     ax.set_yscale('log')
-    ax.set_title('Prior vs Posterior MTTF Predictions\n(Black\'s Equation at constant current density)', 
-                 fontsize='medium', fontweight='bold')
+    #ax.set_title('Prior vs Posterior MTTF Predictions\n(Black\'s Equation at constant current density)', 
+     #            fontsize='medium', fontweight='bold')
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()

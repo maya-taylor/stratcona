@@ -32,6 +32,24 @@ import stratcona
 # Then try to figure out parameters that work for hybrid bonding set-up... later problem!
 ENTROPY_SAMPLES = 100_000
 
+
+def plot_nuts_trace(chain_samples, parameter_label, filename, max_samples=10000):
+    chain_samples = np.asarray(chain_samples)
+    single_chain = chain_samples[0, :max_samples]
+    draws = np.arange(1, len(single_chain) + 1)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(draws, single_chain, linewidth=0.9, alpha=0.9, color="#6d9f60")
+
+    ax.set_xlabel('NUTS Sample', fontsize=12)
+    ax.set_ylabel('$ϵ_f$', fontsize=14)
+    #ax.set_title(f'NUTS Trace for $ϵ_f$', fontsize=18, fontweight='bold')
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=150, bbox_inches='tight')
+    print(f"NUTS trace plot saved as '{filename}'")
+    plt.show()
+
 def hybrid_bonding_thermomech():
     """
     Fit Engelmaier thermomechanical fatigue model to hybrid bonding data.
@@ -241,10 +259,20 @@ def hybrid_bonding_thermomech():
         test_name = f'cond3_test_{i}'
         measured_data[test_name] = {'nf_delta_D': jnp.array([[[jnp.log(float(nf_val))]]])}
 
-    am.do_inference(measured_data)
+    inference_result = am.do_inference(measured_data, return_details=True)
     print(f'Inference completed in {time.time() - start_time:.2f} seconds')
     print("Posterior hyper-latent beliefs:")
     print(am.relmdl.hyl_beliefs)
+
+    e_f_trace_samples = np.asarray(inference_result['samples']['e_f_nom'])
+    e_f_stats = inference_result['convergence_stats']['e_f_nom']
+    print(
+        f"e_f NUTS diagnostics: ESS={float(e_f_stats['ess']):.2f}, "
+        f"split-Rhat={float(e_f_stats['srhat']):.4f}"
+    )
+
+    trace_filename = 'hybrid_bonding_e_f_nuts_trace.png'
+    plot_nuts_trace(e_f_trace_samples, 'e_f', trace_filename)
 
     #################################################################
     # -------- POSTERIOR ENTROPY CALCULATION -------------------------
@@ -439,7 +467,7 @@ def hybrid_bonding_thermomech():
     )
     
     # ---- Data Points (all conditions) ----
-    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="#AD9610", s=100, marker="o", label="Data Points (T=50,t=600)", zorder=5)
+    plt.scatter(Nf_data_cond1, 100*delta_D_data_cond1, color="#AD9610", s=100, marker="o", label="Test Data Points", zorder=5)
     # plt.scatter(Nf_data_cond2, 100*delta_D_data_cond2, color="orange", s=100, marker="s", label="Data Cond2 (T=60,t=500)", zorder=5)
     # plt.scatter(Nf_data_cond3, 100*delta_D_data_cond3, color="brown", s=100, marker="^", label="Data Cond3 (T=40,t=300)", zorder=5)
     
@@ -449,7 +477,7 @@ def hybrid_bonding_thermomech():
     
     plt.xlabel("Mean Cycles to Failure (Nf, 50%)", fontsize=12)
     plt.ylabel("Inelastic Strain Range (ΔD, %)", fontsize=12)
-    plt.title("Posterior Mean and CI vs. Prior and Test Data Means", fontsize=14, fontweight='bold')
+    #plt.title("Posterior Mean and CI vs. Prior and Test Data Means", fontsize=14, fontweight='bold')
     plt.legend(fontsize=11)
     plt.grid(True, which="both", alpha=0.3)
     plt.tight_layout()
@@ -614,7 +642,7 @@ def hybrid_bonding_thermomech():
     #################################################################
     
     sb.set_context('notebook')
-    sb.set_theme(style='ticks', font='Times New Roman')
+    #sb.set_theme(style='ticks', font='Times New Roman')
     
     fig, p = plt.subplots(1, 1, figsize=(10, 6))
     display_map = {
@@ -646,33 +674,29 @@ def hybrid_bonding_thermomech():
     for fill in p.collections:
         fill.set_alpha(0.75)
     
-    plt.rcParams['mathtext.fontset'] = 'custom'
-    plt.rcParams['mathtext.rm'] = 'Times New Roman'
-    plt.rcParams['mathtext.it'] = 'Times New Roman'
-    plt.rcParams['font.family'] = 'Times New Roman'
-    
     # Add text annotations showing entropy and information gain (inside plot, offset above and below)
     pos = range(len(hyls))
     for tick, hyl in enumerate(hyls):
         y_pos = pos[tick]
         # Position entropy labels inside the plot area, stacked vertically offset from center
-        p.text(p.get_xlim()[0] + 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos - 0.35,
+        p.text(p.get_xlim()[0] + 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos - 0.32,
                f'$H_{{prior}}={round(float(pri_entropy[hyl]), 2)}$',
-               horizontalalignment='left', size='medium', color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+             horizontalalignment='left', fontsize=12, fontweight='semibold', color='black',
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='white', edgecolor='black', linewidth=0.8, alpha=0.95))
         p.text(p.get_xlim()[0] + 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos + 0.35,
                f'$H_{{posterior}}={round(float(pst_entropy[hyl]), 2)}$',
-               horizontalalignment='left', size='medium', color='black', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+             horizontalalignment='left', fontsize=12, fontweight='semibold', color='black',
+             bbox=dict(boxstyle='round,pad=0.4', facecolor='white', edgecolor='black', linewidth=0.8, alpha=0.95))
         p.text(p.get_xlim()[1] - 0.05 * (p.get_xlim()[1] - p.get_xlim()[0]), y_pos,
                f'$IG={round(float(hyl_ig[hyl]), 2)}$',
-               horizontalalignment='right', verticalalignment='center', size='medium', color='black', weight='bold', 
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+             horizontalalignment='right', verticalalignment='center', fontsize=12, color='black', fontweight='bold',
+             bbox=dict(boxstyle='round,pad=0.45', facecolor='white', edgecolor='black', linewidth=0.9, alpha=0.95))
     
     p.legend().remove()
-    p.tick_params(axis='y', which='major', labelsize=12, labelfontfamily='Times New Roman')
-    p.set_xlabel('Parameter Value', fontsize='medium')
-    p.set_ylabel('Hyper-latent Variable', fontsize='medium')
-    p.set_title('Prior vs Posterior Distributions with Information Gain', fontsize='medium', fontweight='bold')
-    
+    p.tick_params(axis='y', which='major', labelsize=12)
+    p.set_xlabel('Value Distribution', fontsize='12')
+    p.set_ylabel('Latent Variable', fontsize='12')
+
     plt.tight_layout()
     filename_entropy = 'prior_posterior_entropy_violin.png'
     plt.savefig(filename_entropy, dpi=150, bbox_inches='tight')
