@@ -42,8 +42,8 @@ def plot_nuts_trace(chain_samples, parameter_label, filename, max_samples=10000)
     ax.plot(draws, single_chain, linewidth=0.9, alpha=0.9, color="#6d9f60")
 
     ax.set_xlabel('NUTS Sample', fontsize=12)
-    ax.set_ylabel('$ϵ_f$', fontsize=14)
-    #ax.set_title(f'NUTS Trace for $ϵ_f$', fontsize=18, fontweight='bold')
+    ax.set_ylabel(parameter_label, fontsize=14)
+    ax.set_title(f'NUTS Trace for {parameter_label}', fontsize=16, fontweight='bold')
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
     fig.savefig(filename, dpi=150, bbox_inches='tight')
@@ -264,15 +264,16 @@ def hybrid_bonding_thermomech():
     print("Posterior hyper-latent beliefs:")
     print(am.relmdl.hyl_beliefs)
 
-    e_f_trace_samples = np.asarray(inference_result['samples']['e_f_nom'])
-    e_f_stats = inference_result['convergence_stats']['e_f_nom']
-    print(
-        f"e_f NUTS diagnostics: ESS={float(e_f_stats['ess']):.2f}, "
-        f"split-Rhat={float(e_f_stats['srhat']):.4f}"
-    )
+    for hyl in hyls:
+        trace_samples = np.asarray(inference_result['samples'][hyl])
+        stats = inference_result['convergence_stats'][hyl]
+        print(
+            f"{hyl} NUTS diagnostics: ESS={float(stats['ess']):.2f}, "
+            f"split-Rhat={float(stats['srhat']):.4f}"
+        )
 
-    trace_filename = 'hybrid_bonding_e_f_nuts_trace.png'
-    plot_nuts_trace(e_f_trace_samples, 'e_f', trace_filename)
+        trace_filename = f'hybrid_bonding_{hyl}_nuts_trace.png'
+        plot_nuts_trace(trace_samples, hyl, trace_filename)
 
     #################################################################
     # -------- POSTERIOR ENTROPY CALCULATION -------------------------

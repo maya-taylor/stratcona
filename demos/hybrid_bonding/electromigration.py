@@ -26,6 +26,23 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 import stratcona
 
+def plot_nuts_trace(chain_samples, parameter_label, filename, max_samples=10000):
+    chain_samples = np.asarray(chain_samples)
+    single_chain = chain_samples[0, :max_samples]
+    draws = np.arange(1, len(single_chain) + 1)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(draws, single_chain, linewidth=0.9, alpha=0.9, color="#6d9f60")
+
+    ax.set_xlabel('NUTS Sample', fontsize=12)
+    ax.set_ylabel(parameter_label, fontsize=14)
+    ax.set_title(f'NUTS Trace for {parameter_label}', fontsize=16, fontweight='bold')
+    ax.grid(True, alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(filename, dpi=150, bbox_inches='tight')
+    print(f"NUTS trace plot saved as '{filename}'")
+    plt.show()
+
 BOLTZ_EV = 8.617e-5 #boltzmann constant in eV/K
 
 # This paper has Black's parameters for hybrid bonding
@@ -117,10 +134,20 @@ def hybrid_bonding_electromigration():
     # -------- INFERENCE ON THE MODEL -------------------------------
     #################################################################
     start_time = time.time()
-    am.do_inference(measured_data)
+    inference_result = am.do_inference(measured_data, return_details=True)
     print(f'Inference completed in {time.time() - start_time:.2f} seconds')
     print("Posterior hyper-latent beliefs:")
     print(am.relmdl.hyl_beliefs)
+
+    for hyl in hyls:
+        trace_samples = np.asarray(inference_result['samples'][hyl])
+        stats = inference_result['convergence_stats'][hyl]
+        print(
+            f"{hyl} NUTS diagnostics: ESS={float(stats['ess']):.2f}, "
+            f"split-Rhat={float(stats['srhat']):.4f}"
+        )
+        trace_filename = f'electromigration_{hyl}_nuts_trace.png'
+        plot_nuts_trace(trace_samples, hyl, trace_filename)
 
     #################################################################
     # -------- POSTERIOR ENTROPY CALCULATION ------------------------
