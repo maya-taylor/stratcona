@@ -233,10 +233,33 @@ def marginalize_v_naive(rng_key, spm, batch_dims: tuple[int, int, int], test_dim
 
 
 def inference_model(model, hyl_info, observed_data, rng_key, num_samples: int = 10_000, num_chains: int = 4,
-                    return_details: bool = False):
+                    return_details: bool = False, collect_warmup: bool = False):
     kernel = NUTS(model)
     sampler = MCMC(kernel, num_warmup=2_000, num_samples=num_samples, num_chains=num_chains, progress_bar=True)
-    sampler.run(rng_key, measured=observed_data, extra_fields=('potential_energy',))
+
+    warmup_samples = None
+    if collect_warmup:
+        # Use sequential chain execution when collecting warmup to avoid repeated pmap mesh issues
+        sampler = MCMC(
+            kernel,
+            num_warmup=2_000,
+            num_samples=num_samples,
+            num_chains=num_chains,
+            chain_method='sequential',
+            progress_bar=True,
+        )
+        warmup_key, sample_key = rand.split(rng_key)
+        sampler.warmup(
+            warmup_key,
+            measured=observed_data,
+            extra_fields=('potential_energy',),
+            collect_warmup=True,
+        )
+        warmup_samples = sampler.get_samples(group_by_chain=True)
+        sampler.run(sample_key, measured=observed_data, extra_fields=('potential_energy',))
+    else:
+        sampler.run(rng_key, measured=observed_data, extra_fields=('potential_energy',))
+
     samples = sampler.get_samples(group_by_chain=True)
 
     convergence_stats = {}
@@ -257,6 +280,7 @@ def inference_model(model, hyl_info, observed_data, rng_key, num_samples: int = 
         return {
             'new_prior': new_prior,
             'samples': samples,
+            'warmup_samples': warmup_samples,
             'convergence_stats': convergence_stats,
             'extra_fields': extra_info,
             'diverging': diverging,

@@ -35,12 +35,17 @@ class AnalysisManager:
         else:
             return self.relmdl.sample(rng, self.test.dims, self.test.conds, num, self.relmdl.observes)
 
-    def do_inference(self, observations, test: TestDef = None, auto_update_prior=True, return_details=False):
+    def do_inference(self, observations, test: TestDef = None, auto_update_prior=True, return_details=False, collect_warmup=False):
         rng = self._derive_key()
         test_info = test if test is not None else self.test
         inf_mdl = partial(self.relmdl.spm, test_info.dims, test_info.conds, self.relmdl.hyl_beliefs, self.relmdl.param_vals)
         inference_result = inference_model(
-            inf_mdl, self.relmdl.hyl_info, observations, rng, return_details=return_details
+            inf_mdl,
+            self.relmdl.hyl_info,
+            observations,
+            rng,
+            return_details=return_details,
+            collect_warmup=collect_warmup,
         )
         new_prior = inference_result['new_prior'] if return_details else inference_result
         if auto_update_prior:
